@@ -116,7 +116,11 @@ def main(argv: list[str] | None = None) -> int:
                     return
         try:
             if t.new_state == ADAY:
-                caption = aday_card(t.setup)
+                # Karakter skoru lookup (varsa karta yansıt)
+                karakter = store.get_karakter_score(
+                    t.setup.symbol, t.setup.interval, t.setup.pattern_name, t.setup.direction,
+                )
+                caption = aday_card(t.setup, karakter=karakter)
                 if not args.no_chart:
                     chart = render_setup_chart(t.setup, poller.buffer.as_list())
                     tg.send_photo(chart, caption=caption)

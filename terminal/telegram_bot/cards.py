@@ -37,8 +37,12 @@ def _htf_line(setup: Setup) -> str:
     return f"HTF ({setup.htf_interval}): {arrow} {setup.htf_trend} — {align}"
 
 
-def aday_card(setup: Setup) -> str:
-    """Aday setup için (yeni tespit edildi, henüz fiyat PRZ'ye girmedi)."""
+def aday_card(setup: Setup, karakter: tuple[float, int] | None = None) -> str:
+    """Aday setup için (yeni tespit edildi, henüz fiyat PRZ'ye girmedi).
+
+    Args:
+        karakter: opsiyonel (karakter_score, sample_count) — lab verisi varsa.
+    """
     s = setup
     d_time = s.pivots["D"].time
     risk_pct = _abs_pct(s.stop, s.entry)
@@ -66,6 +70,9 @@ def aday_card(setup: Setup) -> str:
     ]
     if htf:
         lines.append(htf)
+    if karakter is not None and karakter[1] >= 3:
+        score, n = karakter
+        lines.append(f"Karakter: `{score:.0f}/100` ({n} örneklem)")
     lines.append(f"D pivot: `{_fmt(d_time)}`")
     return "\n".join(lines)
 

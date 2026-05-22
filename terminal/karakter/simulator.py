@@ -1,0 +1,94 @@
+"""Setup outcome simülatörü — bir setup'ın D pivotundan sonraki mum dizisinde
+ne olacağını (TP/STOP/EO/ZI) yaşam döngüsü kurallarıyla hesaplar.
+
+Pure function: DB'ye yazmaz, sadece outcome döner. Lab/backtest için.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from terminal.detection.models import Setup
+
+
+@dataclass
+class SimOutcome:
+    """Backtest outcome'u."""
+    outcome: str            # 'TP', 'STOP', 'EO', 'ZI', 'Aday' (henüz aktif değil),
+                            # 'Aktif' (henüz sonuç yok)
+    entered_idx: int | None    # Aktif olduğu kline indeksi (D'den sonra)
+    entered_time: int | None   # ms
+    exited_idx: int | None     # terminal duruma geçtiği kline indeksi
+    exited_time: int | None    # ms
+    ambiguous: bool = False    # aynı barda hem TP hem SL vurulduysa True (konservatif → STOP)
+
+
+def simulate_outcome(
+    setup: Setup,
+    future_klines: list[dict[str, Any]],
+    aday_timeout: int = 60,
+    aktif_timeout: int = 120,
+) -> SimOutcome:
+    """D pivotundan sonraki mum dizisini gez, setup outcome'unu döner.
+
+    Args:
+        setup: tespit edilen setup (Entry/SL/TP1 seviyeleri kullanılır).
+        future_klines: D pivotundan SONRAKİ mum dizisi (D dahil değil).
+        aday_timeout: Aday'da kalış limiti (mum sayısı).
+        aktif_timeout: Aktif'te kalış limiti.
+
+    Returns:
+        SimOutcome — terminal state'e ulaştıysa TP/STOP/EO/ZI; ulaşmadıysa
+        'Aday' veya 'Aktif' (mum dizisi tükendi).
+    """
+    state = "Aday"
+    entered_idx: int | None = None
+    entered_time: int | None = None
+    bull = setup.direction == "bull"
+
+    for i, bar in enumerate(future_klines):
+        if state == "Aday":
+            triggered = (bull and bar["low"] <= setup.entry) or \
+                        (not bull and bar["high"] >= setup.entry)
+            if triggered:
+                state = "Aktif"
+                entered_idx = i
+                entered_time = bar["open_time"]
+                # Entry barında TP/SL kontrolü: bu barda da hit olabilir
+                # (aşağıdaki Aktif bloğuna devam edilecek — `continue` yok)
+            elif i >= aday_timeout:
+                return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                                  exited_idx=i, exited_time=bar["open_time"])
+
+        if state == "Aktif":
+            if bull:
+                hit_tp = bar["high"] >= setup.tp1
+                hit_sl = bar["low"] <= setup.stop
+            else:
+                hit_tp = bar["low"] <= setup.tp1
+                hit_sl = bar["high"] >= setup.stop
+
+            if hit_tp and hit_sl:
+                # Aynı barda hem TP hem SL: konservatif → STOP
+                return SimOutcome(outcome="STOP", entered_idx=entered_idx,
+                                  entered_time=entered_time, exited_idx=i,
+                                  exited_time=bar["open_time"], ambiguous=True)
+            if hit_tp:
+                return SimOutcome(outcome="TP", entered_idx=entered_idx,
+                                  entered_time=entered_time, exited_idx=i,
+                                  exited_time=bar["open_time"])
+            if hit_sl:
+                return SimOutcome(outcome="STOP", entered_idx=entered_idx,
+                                  entered_time=entered_time, exited_idx=i,
+                                  exited_time=bar["open_time"])
+
+            # Zaman aşımı (Aktif'te uzun kalma)
+            bars_in_aktif = i - (entered_idx or i)
+            if bars_in_aktif >= aktif_timeout:
+                return SimOutcome(outcome="ZI", entered_idx=entered_idx,
+                                  entered_time=entered_time, exited_idx=i,
+                                  exited_time=bar["open_time"])
+
+    # Mum dizisi tükendi, terminal durum yok
+    return SimOutcome(outcome=state, entered_idx=entered_idx, entered_time=entered_time,
+                      exited_idx=None, exited_time=None)

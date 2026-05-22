@@ -105,3 +105,66 @@ CREATE TABLE IF NOT EXISTS setup_events (
 
 CREATE INDEX IF NOT EXISTS idx_events_setup
     ON setup_events (setup_id, event_time);
+
+
+-- ============================================================
+-- Faz 5: Parite Karakter Tanıma Laboratuvarı
+-- ============================================================
+
+-- Her lab koşusu için tek satır.
+CREATE TABLE IF NOT EXISTS karakter_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at    INTEGER NOT NULL,
+    finished_at   INTEGER,
+    bars_per_pair INTEGER NOT NULL,
+    symbols       TEXT,            -- JSON dizi
+    intervals     TEXT,            -- JSON dizi
+    sample_count  INTEGER,
+    notes         TEXT
+);
+
+-- Her tek setup outcome'u için bir satır (lab içinde tespit edilen).
+CREATE TABLE IF NOT EXISTS karakter_samples (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id         INTEGER NOT NULL,
+    symbol         TEXT NOT NULL,
+    interval       TEXT NOT NULL,
+    pattern_name   TEXT NOT NULL,
+    direction      TEXT NOT NULL,  -- 'bull'/'bear'
+    d_time         INTEGER NOT NULL,
+    d_price        REAL    NOT NULL,
+    entry          REAL    NOT NULL,
+    stop           REAL    NOT NULL,
+    tp1            REAL    NOT NULL,
+    q_score        INTEGER,
+    outcome        TEXT NOT NULL,  -- 'TP','STOP','EO','ZI','Aday','Aktif'
+    entered_at     INTEGER,        -- Aktif olduğu mum (open_time)
+    exited_at      INTEGER,        -- terminal duruma geçtiği mum
+    ambiguous      INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (run_id) REFERENCES karakter_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_karakter_samples_lookup
+    ON karakter_samples (symbol, interval, pattern_name, outcome);
+
+-- Aggregate skor tablosu (sample'lardan computed). direction='all' tüm bull+bear,
+-- direction='bull' veya 'bear' özel kırılım.
+CREATE TABLE IF NOT EXISTS karakter_scores (
+    symbol         TEXT NOT NULL,
+    interval       TEXT NOT NULL,
+    pattern_name   TEXT NOT NULL,
+    direction      TEXT NOT NULL,
+    sample_count   INTEGER NOT NULL,
+    tp_count       INTEGER NOT NULL,
+    stop_count     INTEGER NOT NULL,
+    eo_count       INTEGER NOT NULL,
+    zi_count       INTEGER NOT NULL,
+    open_count     INTEGER NOT NULL,
+    win_rate       REAL,
+    karakter_score REAL,
+    updated_at     INTEGER NOT NULL,
+    PRIMARY KEY (symbol, interval, pattern_name, direction)
+);
+
+CREATE INDEX IF NOT EXISTS idx_karakter_scores_top
+    ON karakter_scores (karakter_score DESC);

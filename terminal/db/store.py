@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
@@ -284,6 +285,98 @@ class Store:
             f"UPDATE setup_lifecycle SET {col} = 1 WHERE setup_id = ?",
             (setup_id,),
         )
+
+    # ---- karakter lab ----
+
+    def create_karakter_run(
+        self, started_at: int, bars_per_pair: int,
+        symbols: list[str], intervals: list[str], notes: str = "",
+    ) -> int:
+        cur = self._conn.execute(
+            """INSERT INTO karakter_runs (started_at, bars_per_pair, symbols, intervals, notes)
+               VALUES (?, ?, ?, ?, ?)""",
+            (started_at, bars_per_pair, json.dumps(symbols), json.dumps(intervals), notes),
+        )
+        return int(cur.lastrowid)
+
+    def finish_karakter_run(self, run_id: int, sample_count: int) -> None:
+        self._conn.execute(
+            """UPDATE karakter_runs SET finished_at = ?, sample_count = ? WHERE id = ?""",
+            (int(time.time() * 1000), sample_count, run_id),
+        )
+
+    def add_karakter_sample(self, run_id: int, setup: "Setup", outcome) -> None:
+        # outcome: SimOutcome (terminal.karakter.simulator)
+        self._conn.execute(
+            """INSERT INTO karakter_samples
+               (run_id, symbol, interval, pattern_name, direction,
+                d_time, d_price, entry, stop, tp1, q_score,
+                outcome, entered_at, exited_at, ambiguous)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_id, setup.symbol, setup.interval, setup.pattern_name, setup.direction,
+                setup.pivots["D"].time, setup.pivots["D"].price,
+                setup.entry, setup.stop, setup.tp1,
+                setup.q_score or None,
+                outcome.outcome, outcome.entered_time, outcome.exited_time,
+                1 if outcome.ambiguous else 0,
+            ),
+        )
+
+    def recompute_karakter_scores(self) -> int:
+        """karakter_samples'tan karakter_scores tablosunu yeniden oluştur.
+
+        Hem direction='all' (toplam) hem bull/bear ayrıştırılmış kayıt üretir.
+        """
+        now = int(time.time() * 1000)
+        from terminal.karakter.score import compute_stats
+
+        # Tüm grupları topla
+        cur = self._conn.execute(
+            """SELECT symbol, interval, pattern_name, direction, outcome
+               FROM karakter_samples"""
+        )
+        # (symbol, interval, pattern, direction_key) → list[outcome]
+        buckets: dict[tuple[str, str, str, str], list[str]] = {}
+        for row in cur.fetchall():
+            sym, iv, pat, dirn, oc = row
+            for dkey in (dirn, "all"):
+                key = (sym, iv, pat, dkey)
+                buckets.setdefault(key, []).append(oc)
+
+        # Eski skorları temizle
+        self._conn.execute("DELETE FROM karakter_scores")
+
+        rows = 0
+        for (sym, iv, pat, dirn), outcomes in buckets.items():
+            stats = compute_stats(outcomes)
+            self._conn.execute(
+                """INSERT INTO karakter_scores
+                   (symbol, interval, pattern_name, direction,
+                    sample_count, tp_count, stop_count, eo_count, zi_count,
+                    open_count, win_rate, karakter_score, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (sym, iv, pat, dirn,
+                 stats.sample_count, stats.tp_count, stats.stop_count,
+                 stats.eo_count, stats.zi_count, stats.open_count,
+                 stats.win_rate, stats.karakter_score, now),
+            )
+            rows += 1
+        return rows
+
+    def get_karakter_score(
+        self, symbol: str, interval: str, pattern_name: str, direction: str = "all",
+    ) -> tuple[float, int] | None:
+        """(karakter_score, sample_count) döner. Kayıt yoksa None."""
+        cur = self._conn.execute(
+            """SELECT karakter_score, sample_count FROM karakter_scores
+               WHERE symbol=? AND interval=? AND pattern_name=? AND direction=?""",
+            (symbol, interval, pattern_name, direction),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return float(row[0] or 0), int(row[1] or 0)
 
     def lifecycle_stats(self, symbol: str | None = None, interval: str | None = None) -> dict[str, int]:
         sql = """SELECT l.state, COUNT(*) as n FROM setup_lifecycle l

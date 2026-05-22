@@ -22,7 +22,7 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 | 2 | Formasyon tespit motoru (ZigZag + XABCD eşleştirici) | ✓ tamam |
 | 3 | Trade yaşam döngüsü + Telegram bildirim | ✓ tamam |
 | 4 | Q skoru + HTF-LTF kontrol | ✓ tamam |
-| 5 | Parite Karakter Laboratuvarı | bekliyor |
+| 5 | Parite Karakter Laboratuvarı | ✓ tamam |
 | 6 | PySide6 masaüstü UI | bekliyor |
 | 7 | Learning Journal + Kiraz (AI notları) | bekliyor |
 | 8 | Ölçek (75 parite) + denetim arayüzü | bekliyor |
@@ -152,6 +152,28 @@ HTF trendiyle zıt ise **Elenen** bayrağı set edilir — Telegram'a gitmez
 - `--include-elenen` — elenen setup'ları da gönder
 - `--no-htf` — HTF kontrolünü atla (Q skorunda HTF=0)
 
+### Parite Karakter Laboratuvarı (Faz 5)
+
+Tarihsel toplu backtest: her (parite × TF) için N mum çekilir, tüm formasyonlar
+bulunur, her birinin D pivotundan sonraki mumlarla outcome'u simüle edilir
+(TP / STOP / EO / ZI). Sonuçlar `karakter_samples` tablosuna yazılır, sonra
+`karakter_scores` aggregasyonu üretilir.
+
+Karakter skoru = WR × min(N/30, 1.0) × 100. Yani 30+ kararlı örneklem
+(TP+STOP) tam ağırlık verir; daha az örneklem skoru düşürür (güvenilirlik
+cezası). Live setup tespit edildiğinde, ilgili (parite, TF, pattern, yön)
+karakter skoru DB'den okunup Telegram kartına eklenir.
+
+```bash
+python -m terminal.cli.karakter_lab \
+    --symbols BTCUSDT,ETHUSDT,SOLUSDT,AVAXUSDT,DOGEUSDT,XRPUSDT,LINKUSDT,BNBUSDT \
+    --intervals 15m,30m,60m,4h \
+    --bars 20000
+```
+
+> MEXC limiti: tek istekte max 500 mum. 20K mum = 40 sayfa istek (~10 saniye
+> her parite × TF). 8 parite × 4 TF = 320 istek ≈ 80 saniye.
+
 ## Klasör yapısı
 
 ```
@@ -175,6 +197,11 @@ terminal/
 ├── quality/
 │   ├── score.py         # Q skoru hesaplayıcı (0-100) + kategori
 │   └── htf_ltf.py       # HTF eşleştirme + EMA trend tespiti + uyum kontrolü
+├── karakter/
+│   ├── simulator.py     # setup outcome simulator (TP/STOP/EO/ZI)
+│   ├── runner.py        # toplu lab koşusu (parite × TF taraması)
+│   ├── score.py         # outcome agregasyon → karakter skoru
+│   └── reports.py       # top sıralamalar (parite/pattern/kombinasyon)
 ├── telegram_bot/
 │   ├── client.py        # httpx tabanlı Telegram API sarmalayıcı
 │   ├── cards.py         # Aday/Aktif/Exit kart formatlayıcısı
@@ -186,7 +213,8 @@ terminal/
     ├── run_data.py      # Faz 1 (sadece veri)
     ├── scan_history.py  # Faz 2 (tarihsel tarama, tek seferlik)
     ├── tg_setup.py      # Faz 3 (Telegram chat_id keşfi)
-    └── run_live.py      # Faz 3 (veri + tespit + lifecycle + Telegram)
+    ├── run_live.py      # Faz 3+4 (veri + tespit + lifecycle + Telegram + Q)
+    └── karakter_lab.py  # Faz 5 (toplu backtest, karakter skor)
 
 tests/
 ├── synthetic.py         # bilinen oranlardan sentetik XABCD kline üretici
