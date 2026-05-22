@@ -23,7 +23,7 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 | 3 | Trade yaşam döngüsü + Telegram bildirim | ✓ tamam |
 | 4 | Q skoru + HTF-LTF kontrol | ✓ tamam |
 | 5 | Parite Karakter Laboratuvarı | ✓ tamam |
-| 6 | PySide6 masaüstü UI | bekliyor |
+| 6 | PySide6 masaüstü UI (MVP) | ✓ tamam |
 | 7 | Learning Journal + Kiraz (AI notları) | bekliyor |
 | 8 | Ölçek (75 parite) + denetim arayüzü | bekliyor |
 
@@ -174,6 +174,25 @@ python -m terminal.cli.karakter_lab \
 > MEXC limiti: tek istekte max 500 mum. 20K mum = 40 sayfa istek (~10 saniye
 > her parite × TF). 8 parite × 4 TF = 320 istek ≈ 80 saniye.
 
+### Masaüstü UI (Faz 6 MVP)
+
+PySide6 (Qt) tabanlı koyu temalı masaüstü uygulaması. Ana bölümler:
+
+- **Üst status bar:** Aktif / Aday / TP / Stop / Entry Yok / Zamansal / Bugünkü Setup / WinRate / Toplam — her 5 saniyede yenilenir.
+- **3 sekme:**
+  - **Setup'lar:** Aday + Aktif setup tablosu. Satıra tıklayınca sağda detay paneli (PRZ bileşenleri, X-A-B-C-D pivotları, oranlar, AB=CD onayı, Q skoru, HTF uyumu, karakter skoru).
+  - **Sonuçlar:** TP/STOP/EO/ZI durumundaki kapanmış setup'lar; outcome filtresi.
+  - **Parite Karakter:** karakter_scores tablosu, yön (all/bull/bear) + min örneklem filtreleri, sıralanabilir kolonlar.
+
+```bash
+pip install PySide6
+python -m terminal.cli.run_ui
+```
+
+DB'de veri yoksa boş açılır. Önce `run_live.py` veya `karakter_lab.py` ile veri biriktir.
+
+> Premium UI özellikleri (Trade Playback, Scanner Journal, Visual Memory) ileri fazlarda eklenecek.
+
 ## Klasör yapısı
 
 ```
@@ -202,6 +221,17 @@ terminal/
 │   ├── runner.py        # toplu lab koşusu (parite × TF taraması)
 │   ├── score.py         # outcome agregasyon → karakter skoru
 │   └── reports.py       # top sıralamalar (parite/pattern/kombinasyon)
+├── ui/
+│   ├── app.py           # PySide6 QApplication + tema
+│   ├── main_window.py   # QMainWindow + 3 sekme + timer refresh
+│   ├── status_bar.py    # üst sayaç bar (9 karelik)
+│   ├── styles.py        # koyu tema QSS
+│   ├── data_provider.py # Store üzerine UI sorgu katmanı
+│   └── widgets/
+│       ├── setups_tab.py    # Aday + Aktif tablosu + detay split
+│       ├── results_tab.py   # TP/STOP/EO/ZI tablosu + filtre
+│       ├── karakter_tab.py  # karakter_scores tablosu (sıralanabilir)
+│       └── detail_panel.py  # sağ detay (HTML rich-text)
 ├── telegram_bot/
 │   ├── client.py        # httpx tabanlı Telegram API sarmalayıcı
 │   ├── cards.py         # Aday/Aktif/Exit kart formatlayıcısı
@@ -214,7 +244,8 @@ terminal/
     ├── scan_history.py  # Faz 2 (tarihsel tarama, tek seferlik)
     ├── tg_setup.py      # Faz 3 (Telegram chat_id keşfi)
     ├── run_live.py      # Faz 3+4 (veri + tespit + lifecycle + Telegram + Q)
-    └── karakter_lab.py  # Faz 5 (toplu backtest, karakter skor)
+    ├── karakter_lab.py  # Faz 5 (toplu backtest, karakter skor)
+    └── run_ui.py        # Faz 6 (PySide6 masaüstü UI)
 
 tests/
 ├── synthetic.py         # bilinen oranlardan sentetik XABCD kline üretici

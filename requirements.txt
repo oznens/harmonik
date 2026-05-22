@@ -1,1 +1,3 @@
 httpx>=0.27
+mplfinance>=0.12
+PySide6>=6.6
