@@ -5,6 +5,8 @@ Bu klasör projenin kalıcı bilgi bankasıdır; terminal bu notlara göre yazı
 
 ## Dosyalar
 
+**Formasyon tanımları (öğrenme/açıklama):**
+
 | Dosya | İçerik |
 |-------|--------|
 | [`00-temel-kavramlar.md`](00-temel-kavramlar.md) | Fibonacci oranları, XABCD yapısı, PRZ, retracement/extension ayrımı |
@@ -16,6 +18,15 @@ Bu klasör projenin kalıcı bilgi bankasıdır; terminal bu notlara göre yazı
 | [`06-shark.md`](06-shark.md) | Shark formasyonu |
 | [`07-5-0.md`](07-5-0.md) | 5-0 formasyonu |
 | [`08-three-drives.md`](08-three-drives.md) | Three Drives formasyonu |
+
+**Terminal uygulaması için (makine-uygulanabilir):**
+
+| Dosya | İçerik |
+|-------|--------|
+| [`09-formasyon-spec.md`](09-formasyon-spec.md) | **Spec tablosu** — her formasyonun kesin parametreleri, B toleransları, stop loss limitleri (Vol. 3). Tespit motorunun temel referansı. |
+| [`10-prz-ve-onay.md`](10-prz-ve-onay.md) | PRZ hesaplama/çakışma kuralları, Terminal Price Bar, ideal dönüş, uyarı sinyalleri (blowout) |
+| [`11-islem-yonetimi.md`](11-islem-yonetimi.md) | İşlem yönetimi: IPO, PPZ, SLZ, 0.382 trailer, zaman projeksiyonları, kontrol listesi |
+| [`12-rsi-bamm.md`](12-rsi-bamm.md) | RSI BAMM — RSI + harmonik formasyon onay/diverjans stratejisi |
 
 ## Hızlı Referans Tablosu
 
