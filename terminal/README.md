@@ -18,8 +18,8 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 
 | Faz | İçerik | Durum |
 |-----|--------|-------|
-| 1 | Veri omurgası (MEXC REST + SQLite + RAM buffer) | **şu an** |
-| 2 | Formasyon tespit motoru (ZigZag + XABCD eşleştirici) | bekliyor |
+| 1 | Veri omurgası (MEXC REST + SQLite + RAM buffer) | ✓ tamam |
+| 2 | Formasyon tespit motoru (ZigZag + XABCD eşleştirici) | ✓ tamam |
 | 3 | Trade yaşam döngüsü + Telegram bildirim | bekliyor |
 | 4 | Q skoru + HTF-LTF kontrol | bekliyor |
 | 5 | Parite Karakter Laboratuvarı | bekliyor |
@@ -27,19 +27,29 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 | 7 | Learning Journal + Kiraz (AI notları) | bekliyor |
 | 8 | Ölçek (75 parite) + denetim arayüzü | bekliyor |
 
-## Faz 1 kullanım
+## Kullanım
 
 ```bash
 # bağımlılıklar (bir kez)
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # test çalıştırmak için
 
-# tek parite × tek aralık için canlı veri akışı
+# 1) Canlı veri akışı (sadece kline, formasyon yok) — Faz 1
 python -m terminal.cli.run_data --symbol BTCUSDT --interval 1h
-python -m terminal.cli.run_data --symbol ETHUSDT --interval 15m
-```
 
-Çıktı: her yeni **kapanmış** mum konsola log'lanır ve `data/terminal.db`
-dosyasına yazılır. Ctrl+C ile temiz kapanır.
+# 2) Tarihsel formasyon taraması (tek seferlik) — Faz 2
+python -m terminal.cli.scan_history --symbol BTCUSDT --interval 1h --bars 500
+python -m terminal.cli.scan_history --symbol AVAXUSDT --interval 60m --store
+# --store: bulunan setup'ları data/terminal.db'ye yazar
+# --zigzag 0.012: özel ZigZag eşiği (varsayılan TF'e göre değişir)
+
+# 3) Canlı veri + her kapanan mumda formasyon taraması — Faz 2
+python -m terminal.cli.run_live --symbol BTCUSDT --interval 1h
+# bootstrap'tan sonra tarihsel formasyonları log'lar, sonra canlı bekler
+
+# Testler
+pytest tests/ -v
+```
 
 ### Geçerli aralık değerleri
 
@@ -47,21 +57,53 @@ dosyasına yazılır. Ctrl+C ile temiz kapanır.
 
 ### Veritabanı
 
-`data/terminal.db` — SQLite. Tek tablo (Faz 1): `klines`.
+`data/terminal.db` — SQLite, WAL modu. Tablolar:
+- `klines` — ham mumlar (symbol, interval, open_time PK)
+- `setups` — tespit edilen formasyonlar (5 pivot + oranlar + PRZ + Entry/SL/TP)
+
 Yedekleme = dosyayı kopyalamak.
+
+### Tespit edilen formasyonlar (Faz 2)
+
+`notlar/09-formasyon-spec.md` Vol.3 değerleriyle birebir:
+- **XABCD M/W:** Gartley, Bat, Alternate Bat, Butterfly, Crab, Deep Crab
+- AB=CD onayı (yaklaşıklık ±%10)
+- ZigZag pivot dedektörü (yüzde tabanlı, TF başına ayarlanabilir)
+
+PRZ bileşenleri: tanımlayıcı XA + AB=CD katları + BC projeksiyonu uç değerleri.
+Entry = tanımlayıcı limit (D ideal). SL = `stop_at_xa` katında. TP1/TP2 =
+formasyon uç noktalarından 0.382 / 0.618 IPO.
+
+> Shark + 5-0 + Three Drives (M/W olmayan) ileri fazlarda eklenecek.
 
 ## Klasör yapısı
 
 ```
 terminal/
-├── config.py           # genel sabitler
+├── config.py            # genel sabitler
 ├── data/
-│   ├── mexc_client.py  # MEXC REST sarmalayıcı
-│   ├── buffer.py       # RAM içi kline halka tamponu
-│   └── kline_poller.py # polling döngüsü, yeni kapanan mum tespiti
+│   ├── mexc_client.py   # MEXC REST sarmalayıcı
+│   ├── buffer.py        # RAM içi kline halka tamponu
+│   └── kline_poller.py  # polling döngüsü, yeni kapanan mum tespiti
+├── detection/
+│   ├── pivots.py        # ZigZag (yüzde tabanlı)
+│   ├── ratios.py        # Fibonacci oran hesaplayıcıları
+│   ├── spec.py          # PatternSpec + Vol.3 PATTERNS tablosu
+│   ├── models.py        # Setup veri sınıfı
+│   ├── matcher.py       # XABCD 5-pivot eşleştirici
+│   ├── prz.py           # PRZ + Entry/SL/TP
+│   └── scanner.py       # ana orkestratör (klines → list[Setup])
 ├── db/
-│   ├── schema.sql      # SQLite şeması
-│   └── store.py        # DB erişim katmanı
+│   ├── schema.sql       # SQLite şeması (klines + setups)
+│   └── store.py         # DB erişim katmanı
 └── cli/
-    └── run_data.py     # Faz 1 giriş noktası
+    ├── run_data.py      # Faz 1 (sadece veri)
+    ├── scan_history.py  # Faz 2 (tarihsel tarama, tek seferlik)
+    └── run_live.py      # Faz 2 (veri + her kapanışta tarama)
+
+tests/
+├── synthetic.py         # bilinen oranlardan sentetik XABCD kline üretici
+├── test_pivots.py
+├── test_matcher.py
+└── test_scanner.py
 ```

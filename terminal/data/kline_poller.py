@@ -116,10 +116,9 @@ class KlinePoller:
     def _is_closed(kline: dict[str, Any]) -> bool:
         return kline["close_time"] < _now_ms()
 
-    def run(self) -> None:
-        """Sonsuz polling döngüsü. stop() çağrılana kadar çalışır."""
+    def poll_loop(self) -> None:
+        """Sonsuz polling. Bootstrap çağrılmış olmalı. stop() ile durur."""
         self._running = True
-        self.bootstrap()
         log.info("%s polling döngüsü başladı (her %ds)", self._tag, self._poll_seconds)
         while self._running:
             self.poll_once()
@@ -128,6 +127,11 @@ class KlinePoller:
             while self._running and slept < self._poll_seconds:
                 time.sleep(0.5)
                 slept += 0.5
+
+    def run(self) -> None:
+        """Bootstrap + polling döngüsü tek bir çağrıda."""
+        self.bootstrap()
+        self.poll_loop()
 
     def stop(self) -> None:
         self._running = False

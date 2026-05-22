@@ -17,6 +17,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
 
 # Terminal verileri (sadece kök data/ klasörü — runtime SQLite, snapshot'lar)
 /data/
