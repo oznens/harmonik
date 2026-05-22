@@ -1,0 +1,12 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editörler
+.vscode/
+.idea/
+*.swp
+
+# Ortam
+.env
+.env.local
