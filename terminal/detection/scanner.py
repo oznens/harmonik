@@ -2,6 +2,7 @@
 
 Stateless: her çağrıda kline listesini alır, ZigZag çalıştırır, ardışık
 5'li pivot pencerelerinde formasyon arar, eşleşenleri Setup olarak döner.
+İsteğe bağlı HTF mum dizisi verilirse Q skoru ve elenen bayrağı hesaplanır.
 """
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ from terminal.detection.matcher import match_xabcd
 from terminal.detection.models import Setup
 from terminal.detection.pivots import find_pivots
 from terminal.detection.prz import compute_prz, compute_trade_levels
+from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
+from terminal.quality.score import compute_q
 
 log = logging.getLogger(__name__)
 
@@ -38,22 +41,31 @@ def scan_klines(
     symbol: str,
     interval: str,
     zigzag_threshold: float | None = None,
+    htf_klines: list[dict[str, Any]] | None = None,
 ) -> list[Setup]:
-    """Mum dizisinden formasyonları çıkar.
+    """Mum dizisinden formasyonları çıkar; opsiyonel HTF ile Q skoru hesapla.
 
     Args:
-        klines: open_time/open/high/low/close/volume alanlı dict listesi.
+        klines: setup TF'sinin mum dizisi (eski → yeni).
         symbol: parite kodu (örn. "BTCUSDT").
-        interval: aralık ("15m", "1h"/"60m", "4h", "1d"...).
-        zigzag_threshold: özelse yüzde (örn. 0.02). Yoksa interval'a göre varsayılan.
+        interval: setup aralığı ("15m", "60m"/"1h", "4h", "1d"...).
+        zigzag_threshold: özelse yüzde (örn. 0.02). Yoksa interval varsayılanı.
+        htf_klines: üst zaman dilimi mum dizisi (HTF trend için). Yoksa
+                    Q skorunda HTF bileşeni 0 olur, elenen tespiti yapılmaz.
 
     Returns:
-        Setup listesi. Aynı pivot kombinasyonu birden fazla kez girmez.
+        Setup listesi (Q skoru ve HTF bilgisi doldurulmuş).
     """
     threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
     pivots = find_pivots(klines, threshold)
     if len(pivots) < 5:
         return []
+
+    # HTF trendi (tüm setup'lar için aynı, bir kez hesapla)
+    htf_interval = htf_for(interval)
+    htf_trend: str | None = None
+    if htf_klines is not None and htf_interval is not None:
+        htf_trend = detect_trend(htf_klines)
 
     detected_at = int(time.time() * 1000)
     setups: list[Setup] = []
@@ -67,7 +79,7 @@ def scan_klines(
         levels = compute_trade_levels(m, prz)
         q = m.quintet
 
-        setups.append(Setup(
+        setup = Setup(
             symbol=symbol,
             interval=interval,
             pattern_name=m.spec.name,
@@ -87,6 +99,18 @@ def scan_klines(
             tp1=levels["tp1"],
             tp2=levels["tp2"],
             detected_at=detected_at,
-        ))
+            htf_interval=htf_interval,
+            htf_trend=htf_trend,
+        )
+
+        # Q skoru ve HTF uyumu
+        qr = compute_q(setup, htf_trend=htf_trend)
+        setup.q_score = qr.score
+        setup.q_category = qr.category
+        setup.q_components = qr.components
+        setup.htf_aligned = alignment(setup.direction, htf_trend)
+        setup.elenen = setup.htf_aligned is False  # explicit False, neutral değil
+
+        setups.append(setup)
 
     return setups

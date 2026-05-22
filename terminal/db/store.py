@@ -30,6 +30,25 @@ class Store:
         schema_path = Path(__file__).parent / "schema.sql"
         with open(schema_path) as f:
             self._conn.executescript(f.read())
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Eski DB → yeni şema. Sadece eksik kolonları ekler (idempotent)."""
+        cur = self._conn.execute("PRAGMA table_info(setups)")
+        existing = {row[1] for row in cur.fetchall()}
+        # Faz 4 kolonları
+        needed = [
+            ("q_score",      "INTEGER"),
+            ("q_category",   "TEXT"),
+            ("q_components", "TEXT"),
+            ("htf_interval", "TEXT"),
+            ("htf_trend",    "TEXT"),
+            ("htf_aligned",  "INTEGER"),
+            ("elenen",       "INTEGER NOT NULL DEFAULT 0"),
+        ]
+        for col, definition in needed:
+            if col not in existing:
+                self._conn.execute(f"ALTER TABLE setups ADD COLUMN {col} {definition}")
 
     def upsert_kline(self, symbol: str, interval: str, k: dict[str, Any]) -> None:
         self._conn.execute(
@@ -97,12 +116,16 @@ class Store:
                 c_time, c_price, d_time, d_price,
                 b_ratio, c_ratio, d_ratio, bc_proj, cd_ab_ratio, ab_cd_equivalent,
                 prz_low, prz_high, prz_components,
-                entry, stop, tp1, tp2, detected_at
+                entry, stop, tp1, tp2, detected_at,
+                q_score, q_category, q_components,
+                htf_interval, htf_trend, htf_aligned, elenen
             ) VALUES (?, ?, ?, ?,
                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                       ?, ?, ?, ?, ?, ?,
                       ?, ?, ?,
-                      ?, ?, ?, ?, ?)
+                      ?, ?, ?, ?, ?,
+                      ?, ?, ?,
+                      ?, ?, ?, ?)
             ON CONFLICT(symbol, interval, pattern_name, x_time, a_time, b_time, c_time, d_time)
             DO UPDATE SET
                 b_ratio=excluded.b_ratio, c_ratio=excluded.c_ratio,
@@ -113,7 +136,11 @@ class Store:
                 prz_components=excluded.prz_components,
                 entry=excluded.entry, stop=excluded.stop,
                 tp1=excluded.tp1, tp2=excluded.tp2,
-                detected_at=excluded.detected_at
+                detected_at=excluded.detected_at,
+                q_score=excluded.q_score, q_category=excluded.q_category,
+                q_components=excluded.q_components,
+                htf_interval=excluded.htf_interval, htf_trend=excluded.htf_trend,
+                htf_aligned=excluded.htf_aligned, elenen=excluded.elenen
             """,
             (
                 s.symbol, s.interval, s.pattern_name, s.direction,
@@ -126,6 +153,12 @@ class Store:
                 1 if s.ab_cd_equivalent else 0,
                 s.prz_low, s.prz_high, json.dumps(s.prz_components),
                 s.entry, s.stop, s.tp1, s.tp2, s.detected_at,
+                s.q_score if s.q_score else None,
+                s.q_category or None,
+                json.dumps(s.q_components) if s.q_components else None,
+                s.htf_interval, s.htf_trend,
+                (1 if s.htf_aligned else 0) if s.htf_aligned is not None else None,
+                1 if s.elenen else 0,
             ),
         )
         cur = self._conn.execute(
@@ -160,6 +193,8 @@ class Store:
         row = cur.fetchone()
         if row is None:
             return None
+        cols = row.keys()
+        htf_aligned_raw = row["htf_aligned"] if "htf_aligned" in cols else None
         return Setup(
             symbol=row["symbol"],
             interval=row["interval"],
@@ -179,6 +214,13 @@ class Store:
             prz_components=json.loads(row["prz_components"]),
             entry=row["entry"], stop=row["stop"], tp1=row["tp1"], tp2=row["tp2"],
             detected_at=row["detected_at"],
+            q_score=row["q_score"] or 0,
+            q_category=row["q_category"] or "",
+            q_components=json.loads(row["q_components"]) if row["q_components"] else {},
+            htf_interval=row["htf_interval"],
+            htf_trend=row["htf_trend"],
+            htf_aligned=bool(htf_aligned_raw) if htf_aligned_raw is not None else None,
+            elenen=bool(row["elenen"]),
         )
 
     # ---- lifecycle ----

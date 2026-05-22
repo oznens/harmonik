@@ -18,6 +18,25 @@ def _abs_pct(a: float, b: float) -> float:
     return abs(a - b) / b * 100 if b else 0.0
 
 
+def _q_badge(setup: Setup) -> str:
+    if not setup.q_score:
+        return ""
+    return f"Q {setup.q_score} · {setup.q_category or '?'}"
+
+
+def _htf_line(setup: Setup) -> str:
+    if setup.htf_interval is None or setup.htf_trend is None:
+        return ""
+    arrow = {"bull": "↑", "bear": "↓", "neutral": "→"}.get(setup.htf_trend, "?")
+    if setup.htf_aligned is True:
+        align = "uyumlu ✓"
+    elif setup.htf_aligned is False:
+        align = "ZIT ⚠️"
+    else:
+        align = "nötr"
+    return f"HTF ({setup.htf_interval}): {arrow} {setup.htf_trend} — {align}"
+
+
 def aday_card(setup: Setup) -> str:
     """Aday setup için (yeni tespit edildi, henüz fiyat PRZ'ye girmedi)."""
     s = setup
@@ -26,8 +45,14 @@ def aday_card(setup: Setup) -> str:
     reward1_pct = _abs_pct(s.tp1, s.entry)
     rr = reward1_pct / risk_pct if risk_pct else 0.0
 
+    header = "*ADAY SETUP*"
+    if s.elenen:
+        header = "*ADAY [ELENEN]*"
+    q = _q_badge(s)
+    htf = _htf_line(s)
+
     lines = [
-        f"*ADAY SETUP* {_arrow(s.direction)}",
+        f"{header} {_arrow(s.direction)}" + (f"   `{q}`" if q else ""),
         f"*{s.symbol}* `{s.interval}` — `{s.pattern_name}`",
         "",
         f"PRZ: `{s.prz_low:.6g} – {s.prz_high:.6g}`",
@@ -38,8 +63,10 @@ def aday_card(setup: Setup) -> str:
         "",
         f"B={s.b_ratio:.3f}  D={s.d_ratio:.3f}"
         + ("  AB=CD ✓" if s.ab_cd_equivalent else ""),
-        f"D pivot: `{_fmt(d_time)}`",
     ]
+    if htf:
+        lines.append(htf)
+    lines.append(f"D pivot: `{_fmt(d_time)}`")
     return "\n".join(lines)
 
 

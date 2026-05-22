@@ -1,7 +1,7 @@
 """Formasyon dedektör çıktısı: Setup veri sınıfı."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from terminal.detection.pivots import Pivot
 
@@ -38,9 +38,22 @@ class Setup:
 
     detected_at: int    # ms — taramanın çalıştığı an
 
+    # Faz 4: Q skoru + HTF-LTF kontrol (varsayılan: hesaplanmamış)
+    q_score: int = 0
+    q_category: str = ""                              # "Riskli" | "Normal" | "Kaliteli" | ""
+    q_components: dict[str, float] = field(default_factory=dict)
+    htf_interval: str | None = None                   # eşleştirilen üst TF (örn. "4h")
+    htf_trend: str | None = None                      # "bull" | "bear" | "neutral" | None
+    htf_aligned: bool | None = None                   # True/False/None (neutral veya HTF yok)
+    elenen: bool = False                              # HTF zıt yön → Elenen havuzu
+
     def summary(self) -> str:
+        q_part = f" Q={self.q_score}" if self.q_score else ""
+        cat_part = f" {self.q_category}" if self.q_category else ""
+        elenen_part = " [ELENEN]" if self.elenen else ""
         return (
-            f"{self.direction.upper():4s} {self.pattern_name:14s} {self.symbol} {self.interval} "
+            f"{self.direction.upper():4s} {self.pattern_name:14s} {self.symbol} {self.interval}"
+            f"{q_part}{cat_part}{elenen_part} "
             f"| PRZ {self.prz_low:.6g}-{self.prz_high:.6g} "
             f"| Entry {self.entry:.6g} SL {self.stop:.6g} "
             f"TP1 {self.tp1:.6g} TP2 {self.tp2:.6g} "

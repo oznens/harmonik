@@ -21,7 +21,7 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 | 1 | Veri omurgası (MEXC REST + SQLite + RAM buffer) | ✓ tamam |
 | 2 | Formasyon tespit motoru (ZigZag + XABCD eşleştirici) | ✓ tamam |
 | 3 | Trade yaşam döngüsü + Telegram bildirim | ✓ tamam |
-| 4 | Q skoru + HTF-LTF kontrol | bekliyor |
+| 4 | Q skoru + HTF-LTF kontrol | ✓ tamam |
 | 5 | Parite Karakter Laboratuvarı | bekliyor |
 | 6 | PySide6 masaüstü UI | bekliyor |
 | 7 | Learning Journal + Kiraz (AI notları) | bekliyor |
@@ -123,6 +123,35 @@ Her geçiş `setup_events` audit log'una yazılır.
 **Stale Aday filtresi:** D pivot'u son 3 mumdan eski olan Aday'lar Telegram'a
 gitmez, sadece DB'ye kaydedilir (bootstrap spam'ini önler).
 
+### Q (Quality) skoru ve HTF/LTF (Faz 4)
+
+Her setup için 0-100 arası bütünleşik kalite ölçütü, kart üstünde rozet:
+
+| Bileşen | Ağırlık | Ne ölçer |
+|---------|---------|----------|
+| PRZ density | 25 | PRZ bileşenlerinin yakınsama darlığı + sayısı |
+| B precision | 15 | B'nin spec bandı merkezine yakınlığı |
+| D precision | 25 | D'nin tanımlayıcı ideal'e yakınlığı |
+| AB=CD bonus | 15 | AB=CD onayı varsa tam puan |
+| BC projection | 5 | BC band içindeyse tam puan |
+| HTF alignment | 15 | Üst zaman dilimi trendi setup yönüyle uyumlu mu |
+
+**Kategoriler:**
+- 0-49 → **Riskli**
+- 50-69 → **Normal**
+- 70+ → **Kaliteli**
+
+**HTF/LTF eşleştirmesi:** 15m→1h, 30m→4h, 1h→4h, 4h→1d, 1d→1W
+
+HTF trendi EMA20 vs EMA50 ile belirlenir (±%0.3 nötr bandı). Setup yönü
+HTF trendiyle zıt ise **Elenen** bayrağı set edilir — Telegram'a gitmez
+(varsayılan), sadece DB'de tutulur. `--include-elenen` ile dahil edilebilir.
+
+`run_live.py` argümanları:
+- `--min-q 50` — bu Q skorunun altındakileri Telegram'a gönderme
+- `--include-elenen` — elenen setup'ları da gönder
+- `--no-htf` — HTF kontrolünü atla (Q skorunda HTF=0)
+
 ## Klasör yapısı
 
 ```
@@ -143,6 +172,9 @@ terminal/
 ├── lifecycle/
 │   ├── states.py        # state sabitleri + timeout varsayılanları
 │   └── tracker.py       # Aday → Aktif → TP/STOP/EO/ZI durum makinesi
+├── quality/
+│   ├── score.py         # Q skoru hesaplayıcı (0-100) + kategori
+│   └── htf_ltf.py       # HTF eşleştirme + EMA trend tespiti + uyum kontrolü
 ├── telegram_bot/
 │   ├── client.py        # httpx tabanlı Telegram API sarmalayıcı
 │   ├── cards.py         # Aday/Aktif/Exit kart formatlayıcısı

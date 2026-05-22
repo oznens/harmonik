@@ -53,12 +53,16 @@ def to_bear(
 # Her biri spec'in oran bandlarına uyan c_r seçimiyle hazırlanmıştır.
 
 def gartley_bull() -> tuple[list[float], list[str]]:
-    """B=0.618, D=0.786, C=0.50 of AB → bc_proj ≈ 1.544 (Gartley bandında)."""
-    return make_pivots(b_r=0.618, c_r=0.50, d_r=0.786)
+    """B=0.618, D=0.786, C=0.728 of AB.
+
+    c_r=0.728 seçildi: bu değerde AB=CD onayı çıkar (CD/AB=1.0) ve
+    bc_proj ≈ 1.373 → Gartley bandında.
+    """
+    return make_pivots(b_r=0.618, c_r=0.728, d_r=0.786)
 
 
 def bat_bull() -> tuple[list[float], list[str]]:
-    """B=0.50, D=0.886, C=0.50 → bc_proj=2.544 (Bat bandında)."""
+    """B=0.50, D=0.886, C=0.50 → 1.27 AB=CD onayı, bc_proj=2.544 (Bat bandında)."""
     return make_pivots(b_r=0.50, c_r=0.50, d_r=0.886)
 
 

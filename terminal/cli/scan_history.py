@@ -45,17 +45,27 @@ def main(argv: list[str] | None = None) -> int:
     bars = max(50, min(args.bars, 1000))
     threshold = args.zigzag if args.zigzag is not None else default_threshold(interval)
 
+    from terminal.quality.htf_ltf import htf_for
+    htf_interval = htf_for(interval)
     with MexcClient() as client:
         if not client.ping():
             print("MEXC ping başarısız.", file=sys.stderr)
             return 1
         klines = client.klines(symbol, interval, limit=bars)
+        htf_klines = None
+        if htf_interval is not None:
+            try:
+                htf_klines = client.klines(symbol, htf_interval, limit=120)
+            except Exception:
+                htf_klines = None
 
     if not klines:
         print(f"{symbol} {interval}: veri yok.", file=sys.stderr)
         return 1
 
-    setups = scan_klines(klines, symbol, interval, zigzag_threshold=threshold)
+    setups = scan_klines(klines, symbol, interval,
+                         zigzag_threshold=threshold,
+                         htf_klines=htf_klines)
 
     first_t = klines[0]["open_time"]
     last_t = klines[-1]["open_time"]

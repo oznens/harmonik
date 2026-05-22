@@ -55,6 +55,15 @@ CREATE TABLE IF NOT EXISTS setups (
 
     detected_at    INTEGER NOT NULL,
 
+    -- Faz 4: Q skoru + HTF/LTF
+    q_score        INTEGER,
+    q_category     TEXT,
+    q_components   TEXT,                  -- JSON
+    htf_interval   TEXT,
+    htf_trend      TEXT,
+    htf_aligned    INTEGER,               -- 0/1/NULL (NULL = neutral veya HTF yok)
+    elenen         INTEGER NOT NULL DEFAULT 0,
+
     UNIQUE (symbol, interval, pattern_name, x_time, a_time, b_time, c_time, d_time)
 );
 
