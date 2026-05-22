@@ -20,7 +20,7 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 |-----|--------|-------|
 | 1 | Veri omurgası (MEXC REST + SQLite + RAM buffer) | ✓ tamam |
 | 2 | Formasyon tespit motoru (ZigZag + XABCD eşleştirici) | ✓ tamam |
-| 3 | Trade yaşam döngüsü + Telegram bildirim | bekliyor |
+| 3 | Trade yaşam döngüsü + Telegram bildirim | ✓ tamam |
 | 4 | Q skoru + HTF-LTF kontrol | bekliyor |
 | 5 | Parite Karakter Laboratuvarı | bekliyor |
 | 6 | PySide6 masaüstü UI | bekliyor |
@@ -43,13 +43,23 @@ python -m terminal.cli.scan_history --symbol AVAXUSDT --interval 60m --store
 # --store: bulunan setup'ları data/terminal.db'ye yazar
 # --zigzag 0.012: özel ZigZag eşiği (varsayılan TF'e göre değişir)
 
-# 3) Canlı veri + her kapanan mumda formasyon taraması — Faz 2
+# 3) Canlı veri + tespit + lifecycle + Telegram bildirim — Faz 3
+python -m terminal.cli.tg_setup                        # ilk kez: chat_id keşfi
 python -m terminal.cli.run_live --symbol BTCUSDT --interval 1h
-# bootstrap'tan sonra tarihsel formasyonları log'lar, sonra canlı bekler
+python -m terminal.cli.run_live --symbol AVAXUSDT --interval 60m --no-telegram   # sadece DB
 
 # Testler
 pytest tests/ -v
 ```
+
+### Telegram kurulumu
+
+1. [@BotFather](https://t.me/BotFather) ile bot oluştur, token al.
+2. `.env` dosyasına yaz: `TELEGRAM_BOT_TOKEN=...`
+3. Telegram'da bot'a `/start` yaz (veya herhangi bir mesaj).
+4. `python -m terminal.cli.tg_setup` → chat_id'i bulup `.env`'e yazar, test mesajı yollar.
+
+`.env` dosyası `.gitignore`'da — repoya **gitmez**.
 
 ### Geçerli aralık değerleri
 
@@ -76,11 +86,48 @@ formasyon uç noktalarından 0.382 / 0.618 IPO.
 
 > Shark + 5-0 + Three Drives (M/W olmayan) ileri fazlarda eklenecek.
 
+### Yaşam döngüsü (Faz 3)
+
+Her tespit edilen setup için durum makinesi:
+
+```
+        ┌─────────── timeout (Aday > N mum) ─────────────┐
+        ▼                                                │
+       EO ◀──────────────────────────────────────────  Aday
+                                                         │
+                                              entry tetiklendi
+                                                         │
+                                                         ▼
+                       ┌── timeout ───────────────────  Aktif ──┐
+                       ▼                                         │
+                       ZI                                  ┌─────┼─────┐
+                                                           ▼     ▼     ▼
+                                                           TP   STOP   (devam)
+```
+
+- **Aday:** setup tespit edildi, fiyat henüz entry'ye değmedi
+- **Aktif:** entry seviyesi tetiklendi (bull: low ≤ entry / bear: high ≥ entry)
+- **TP:** TP1'e ulaşıldı
+- **STOP:** stop seviyesi kırıldı
+- **EO (Entry Olmadı):** Aday'dayken timeout (varsayılan 60 mum)
+- **ZI (Zamansal İptal):** Aktif'teyken timeout (varsayılan 120 mum)
+
+Her geçiş `setup_events` audit log'una yazılır.
+
+### Telegram kartları (Faz 3)
+
+- **Aday kartı:** parite + TF + pattern + PRZ + Entry/SL/TP + R:R + B/D oranları + AB=CD + D zamanı + **chart PNG** (X-A-B-C-D etiketli, PRZ kutulu, seviyeli)
+- **Aktif kartı:** entry tetik fiyatı + zamanı
+- **TP/STOP/ZI/EO kartları:** çıkış fiyatı + % kazanç/kayıp
+
+**Stale Aday filtresi:** D pivot'u son 3 mumdan eski olan Aday'lar Telegram'a
+gitmez, sadece DB'ye kaydedilir (bootstrap spam'ini önler).
+
 ## Klasör yapısı
 
 ```
 terminal/
-├── config.py            # genel sabitler
+├── config.py            # genel sabitler + .env yükleyici
 ├── data/
 │   ├── mexc_client.py   # MEXC REST sarmalayıcı
 │   ├── buffer.py        # RAM içi kline halka tamponu
@@ -93,17 +140,26 @@ terminal/
 │   ├── matcher.py       # XABCD 5-pivot eşleştirici
 │   ├── prz.py           # PRZ + Entry/SL/TP
 │   └── scanner.py       # ana orkestratör (klines → list[Setup])
+├── lifecycle/
+│   ├── states.py        # state sabitleri + timeout varsayılanları
+│   └── tracker.py       # Aday → Aktif → TP/STOP/EO/ZI durum makinesi
+├── telegram_bot/
+│   ├── client.py        # httpx tabanlı Telegram API sarmalayıcı
+│   ├── cards.py         # Aday/Aktif/Exit kart formatlayıcısı
+│   └── charts.py        # mplfinance ile setup chart PNG üreteci
 ├── db/
-│   ├── schema.sql       # SQLite şeması (klines + setups)
+│   ├── schema.sql       # klines + setups + setup_lifecycle + setup_events
 │   └── store.py         # DB erişim katmanı
 └── cli/
     ├── run_data.py      # Faz 1 (sadece veri)
     ├── scan_history.py  # Faz 2 (tarihsel tarama, tek seferlik)
-    └── run_live.py      # Faz 2 (veri + her kapanışta tarama)
+    ├── tg_setup.py      # Faz 3 (Telegram chat_id keşfi)
+    └── run_live.py      # Faz 3 (veri + tespit + lifecycle + Telegram)
 
 tests/
 ├── synthetic.py         # bilinen oranlardan sentetik XABCD kline üretici
 ├── test_pivots.py
 ├── test_matcher.py
-└── test_scanner.py
+├── test_scanner.py
+└── test_lifecycle.py
 ```

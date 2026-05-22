@@ -151,5 +151,109 @@ class Store:
         cur = self._conn.execute(sql, params)
         return int(cur.fetchone()[0])
 
+    def load_setup(self, setup_id: int) -> "Setup | None":
+        """DB'den setup'ı Setup nesnesi olarak yükle (lifecycle tarafı için)."""
+        from terminal.detection.models import Setup
+        from terminal.detection.pivots import Pivot
+
+        cur = self._conn.execute("SELECT * FROM setups WHERE id = ?", (setup_id,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return Setup(
+            symbol=row["symbol"],
+            interval=row["interval"],
+            pattern_name=row["pattern_name"],
+            direction=row["direction"],
+            pivots={
+                "X": Pivot(0, row["x_time"], row["x_price"], "low" if row["direction"] == "bull" else "high"),
+                "A": Pivot(0, row["a_time"], row["a_price"], "high" if row["direction"] == "bull" else "low"),
+                "B": Pivot(0, row["b_time"], row["b_price"], "low" if row["direction"] == "bull" else "high"),
+                "C": Pivot(0, row["c_time"], row["c_price"], "high" if row["direction"] == "bull" else "low"),
+                "D": Pivot(0, row["d_time"], row["d_price"], "low" if row["direction"] == "bull" else "high"),
+            },
+            b_ratio=row["b_ratio"], c_ratio=row["c_ratio"], d_ratio=row["d_ratio"],
+            bc_proj=row["bc_proj"], cd_ab_ratio=row["cd_ab_ratio"],
+            ab_cd_equivalent=bool(row["ab_cd_equivalent"]),
+            prz_low=row["prz_low"], prz_high=row["prz_high"],
+            prz_components=json.loads(row["prz_components"]),
+            entry=row["entry"], stop=row["stop"], tp1=row["tp1"], tp2=row["tp2"],
+            detected_at=row["detected_at"],
+        )
+
+    # ---- lifecycle ----
+
+    def upsert_lifecycle(
+        self, setup_id: int, state: str, state_changed_at: int,
+        entered_at: int | None = None, exited_at: int | None = None,
+        exit_reason: str | None = None,
+    ) -> None:
+        """Lifecycle satırı upsert. entered_at None ise mevcut değer korunur."""
+        # COALESCE: yeni değer None ise eski değer kalır
+        self._conn.execute(
+            """
+            INSERT INTO setup_lifecycle
+              (setup_id, state, state_changed_at, entered_at, exited_at, exit_reason)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(setup_id) DO UPDATE SET
+              state = excluded.state,
+              state_changed_at = excluded.state_changed_at,
+              entered_at = COALESCE(excluded.entered_at, setup_lifecycle.entered_at),
+              exited_at  = COALESCE(excluded.exited_at,  setup_lifecycle.exited_at),
+              exit_reason = COALESCE(excluded.exit_reason, setup_lifecycle.exit_reason)
+            """,
+            (setup_id, state, state_changed_at, entered_at, exited_at, exit_reason),
+        )
+
+    def get_lifecycle(self, setup_id: int) -> sqlite3.Row | None:
+        cur = self._conn.execute("SELECT * FROM setup_lifecycle WHERE setup_id = ?", (setup_id,))
+        return cur.fetchone()
+
+    def open_setups(self, symbol: str, interval: str) -> list[sqlite3.Row]:
+        """Aday veya Aktif durumdaki tüm setup'lar (bu symbol/interval için)."""
+        cur = self._conn.execute(
+            """
+            SELECT l.* FROM setup_lifecycle l
+            JOIN setups s ON s.id = l.setup_id
+            WHERE s.symbol = ? AND s.interval = ?
+              AND l.state IN ('Aday', 'Aktif')
+            ORDER BY l.state_changed_at DESC
+            """,
+            (symbol, interval),
+        )
+        return cur.fetchall()
+
+    def add_event(
+        self, setup_id: int, prev: str | None, new: str, ev_time: int,
+        price: float | None, notes: str = "",
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO setup_events (setup_id, event_time, prev_state, new_state, trigger_price, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (setup_id, ev_time, prev, new, price, notes),
+        )
+
+    def mark_notified(self, setup_id: int, field: str) -> None:
+        """field: 'aday' | 'aktif' | 'exit'."""
+        col = {"aday": "notified_aday", "aktif": "notified_aktif", "exit": "notified_exit"}[field]
+        self._conn.execute(
+            f"UPDATE setup_lifecycle SET {col} = 1 WHERE setup_id = ?",
+            (setup_id,),
+        )
+
+    def lifecycle_stats(self, symbol: str | None = None, interval: str | None = None) -> dict[str, int]:
+        sql = """SELECT l.state, COUNT(*) as n FROM setup_lifecycle l
+                 JOIN setups s ON s.id = l.setup_id WHERE 1=1"""
+        params: list[Any] = []
+        if symbol:
+            sql += " AND s.symbol = ?"; params.append(symbol)
+        if interval:
+            sql += " AND s.interval = ?"; params.append(interval)
+        sql += " GROUP BY l.state"
+        cur = self._conn.execute(sql, params)
+        return {row["state"]: int(row["n"]) for row in cur.fetchall()}
+
     def close(self) -> None:
         self._conn.close()

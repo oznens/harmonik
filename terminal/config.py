@@ -1,10 +1,32 @@
 """Terminal genel konfigürasyonu."""
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "terminal.db"
+
+
+def _load_dotenv(path: Path = PROJECT_ROOT / ".env") -> None:
+    """Çok hafif .env yükleyici. Sadece KEY=VALUE satırlarını okur."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        os.environ.setdefault(k, v)
+
+
+_load_dotenv()
+
+# Telegram bot ayarları (.env'den)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 MEXC_REST_BASE = "https://api.mexc.com"
 

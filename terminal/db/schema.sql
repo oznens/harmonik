@@ -62,3 +62,37 @@ CREATE INDEX IF NOT EXISTS idx_setups_lookup
     ON setups (symbol, interval, detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_setups_d_time
     ON setups (symbol, interval, d_time DESC);
+
+
+-- Setup yaşam döngüsü: setup başına tek satır, durum değişince güncellenir.
+-- state: 'Aday', 'Aktif', 'TP', 'STOP', 'ZI', 'EO'
+CREATE TABLE IF NOT EXISTS setup_lifecycle (
+    setup_id          INTEGER PRIMARY KEY,
+    state             TEXT NOT NULL,
+    state_changed_at  INTEGER NOT NULL,
+    entered_at        INTEGER,   -- Aktif başlangıcı (entry tetiklendiği an)
+    exited_at         INTEGER,   -- terminal durum (TP/STOP/ZI/EO) zamanı
+    exit_reason       TEXT,
+    notified_aday     INTEGER NOT NULL DEFAULT 0,
+    notified_aktif    INTEGER NOT NULL DEFAULT 0,
+    notified_exit     INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (setup_id) REFERENCES setups(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_lifecycle_state ON setup_lifecycle (state);
+
+
+-- Tüm durum geçişleri için audit log.
+CREATE TABLE IF NOT EXISTS setup_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    setup_id      INTEGER NOT NULL,
+    event_time    INTEGER NOT NULL,  -- ms (tetikleyen mum open_time)
+    prev_state    TEXT,
+    new_state     TEXT NOT NULL,
+    trigger_price REAL,
+    notes         TEXT,
+    FOREIGN KEY (setup_id) REFERENCES setups(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_setup
+    ON setup_events (setup_id, event_time);

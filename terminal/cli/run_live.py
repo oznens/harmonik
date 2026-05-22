@@ -1,8 +1,15 @@
-"""Faz 2 giriş noktası: canlı veri + her kapanan mumda formasyon taraması.
+"""Faz 3: canlı veri + formasyon tespit + yaşam döngüsü + Telegram bildirim.
+
+Akış:
+  1. KlinePoller her yeni kapanan mumda on_closed callback'i çağırır.
+  2. Callback:
+     a) scan_klines ile formasyon arar; yeni Aday setup'ları DB'ye yazar, lifecycle.register_new'a iletir.
+     b) lifecycle.advance ile açık (Aday/Aktif) setup'ları ilerletir.
+     c) Geçiş varsa Telegram'a kart + chart gönderir.
 
 Kullanım:
     python -m terminal.cli.run_live --symbol BTCUSDT --interval 1h
-    python -m terminal.cli.run_live --symbol ETHUSDT --interval 15m --zigzag 0.012
+    python -m terminal.cli.run_live --symbol AVAXUSDT --interval 60m --no-telegram
 """
 from __future__ import annotations
 
@@ -14,10 +21,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 from terminal.cli.run_data import _normalize_interval
+from terminal.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from terminal.data.kline_poller import KlinePoller
 from terminal.data.mexc_client import MexcClient
 from terminal.db.store import Store
 from terminal.detection.scanner import default_threshold, scan_klines
+from terminal.lifecycle.states import ADAY, AKTIF, EO, STOP, TP, ZI
+from terminal.lifecycle.tracker import LifecycleTracker, Transition
+from terminal.telegram_bot.cards import aday_card, aktif_card, exit_card
+from terminal.telegram_bot.charts import render_setup_chart
+from terminal.telegram_bot.client import TelegramClient, TelegramError
 
 log = logging.getLogger(__name__)
 
@@ -29,12 +42,15 @@ def _fmt(ms: int) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="terminal-live",
-        description="terminalMiraz — Faz 2 (canlı veri + formasyon tespit)",
+        description="terminalMiraz — Faz 3 (canlı veri + tespit + lifecycle + Telegram)",
     )
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--interval", default="1h")
-    parser.add_argument("--zigzag", type=float, default=None,
-                        help="ZigZag yüzde eşiği. Yoksa interval'a göre varsayılan.")
+    parser.add_argument("--zigzag", type=float, default=None)
+    parser.add_argument("--no-telegram", action="store_true",
+                        help="Telegram bildirimleri kapat (sadece DB)")
+    parser.add_argument("--no-chart", action="store_true",
+                        help="Chart oluşturma; sadece metin gönder")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
 
@@ -47,43 +63,84 @@ def main(argv: list[str] | None = None) -> int:
     interval = _normalize_interval(args.interval)
     threshold = args.zigzag if args.zigzag is not None else default_threshold(interval)
 
+    # Telegram kurulumu (varsa)
+    tg: TelegramClient | None = None
+    if not args.no_telegram:
+        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+            log.warning("Telegram konfigürasyonu eksik (.env'de TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID gerekli). "
+                        "Bildirim KAPALI. (--no-telegram ile sustur.)")
+        else:
+            try:
+                tg = TelegramClient()
+                me = tg.get_me()
+                log.info("Telegram bağlandı: @%s", me["username"])
+            except TelegramError as e:
+                log.warning("Telegram bağlantısı başarısız: %s — bildirim KAPALI", e)
+                tg = None
+
     client = MexcClient()
     store = Store()
     if not client.ping():
         log.error("MEXC ping başarısız.")
         return 1
 
-    # Aynı setup'ı her kapanan mumda tekrar log'lamamak için son görülen pivot'ları tut.
-    seen_keys: set[tuple] = set()
+    # Stale Aday spam'ini önlemek için: D pivot'u son N mumdan eski olan
+    # Aday'lar Telegram'a gitmez (sadece DB'ye). Aktif/TP/STOP/ZI/EO her zaman gider.
+    FRESH_ADAY_BARS = 3
 
-    def scan_and_store(_closed: dict[str, Any] | None) -> None:
+    def on_transition(t: Transition) -> None:
+        if tg is None:
+            return
+        # Aday tazeliği kontrolü
+        if t.new_state == ADAY:
+            latest_bar = poller.buffer.latest
+            if latest_bar is not None:
+                interval_ms = tracker._interval_ms()
+                age_bars = (latest_bar["open_time"] - t.setup.pivots["D"].time) // interval_ms
+                if age_bars > FRESH_ADAY_BARS:
+                    log.debug("Aday eski (%d mum), Telegram'a gitmiyor", age_bars)
+                    return
+        try:
+            if t.new_state == ADAY:
+                caption = aday_card(t.setup)
+                if not args.no_chart:
+                    chart = render_setup_chart(t.setup, poller.buffer.as_list())
+                    tg.send_photo(chart, caption=caption)
+                else:
+                    tg.send_message(caption)
+            elif t.new_state == AKTIF:
+                tg.send_message(aktif_card(t.setup, t.trigger_price or t.setup.entry, t.trigger_time))
+            elif t.new_state in (TP, STOP, ZI, EO):
+                tg.send_message(exit_card(t.setup, t.new_state, t.trigger_price or t.setup.entry, t.trigger_time))
+        except TelegramError as e:
+            log.warning("Telegram gönderim hatası: %s", e)
+
+    tracker = LifecycleTracker(symbol, interval, store, on_transition=on_transition)
+
+    def process_new_candle(_closed: dict[str, Any] | None) -> None:
         klines = poller.buffer.as_list()
         if len(klines) < 20:
             return
+
+        # 1) Formasyon tara
         setups = scan_klines(klines, symbol, interval, zigzag_threshold=threshold)
-        if not setups:
-            return
-
-        setups.sort(key=lambda s: s.pivots["D"].time, reverse=True)
-        new_count = 0
         for s in setups:
-            key = (s.pattern_name,
-                   s.pivots["X"].time, s.pivots["A"].time,
-                   s.pivots["B"].time, s.pivots["C"].time, s.pivots["D"].time)
-            is_new = key not in seen_keys
-            seen_keys.add(key)
-            store.upsert_setup(s)
-            if is_new:
-                new_count += 1
+            # upsert_setup idempotent — aynı 5 pivot tekrar verilirse mevcut id döner.
+            setup_id = store.upsert_setup(s)
+            # Sadece daha önce kaydedilmemişse register_new (DB'den kontrol)
+            if store.get_lifecycle(setup_id) is None:
                 d_time = s.pivots["D"].time
-                # Son 3 mumda D oluştuysa "YENİ", değilse tarihsel
                 tag = "YENI" if d_time >= klines[-3]["open_time"] else "TARIHSEL"
-                log.info("[%s] %s | D@%s", tag, s.summary(), _fmt(d_time))
+                log.info("[%s] tespit: %s | D@%s | id=%d",
+                         tag, s.summary(), _fmt(d_time), setup_id)
+                tracker.register_new(s, setup_id)
 
-        if new_count == 0:
-            log.debug("Tarama tamam, yeni formasyon yok (%d toplam).", len(setups))
+        # 2) Açık setup'ları ilerlet
+        transitions = tracker.advance(klines)
+        if transitions:
+            log.info("Lifecycle geçişleri: %d", len(transitions))
 
-    poller = KlinePoller(symbol, interval, client, store, on_closed=scan_and_store)
+    poller = KlinePoller(symbol, interval, client, store, on_closed=process_new_candle)
 
     def shutdown(signum, frame):  # noqa: ARG001
         log.info("Kapatma sinyali alındı...")
@@ -94,15 +151,19 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         poller.bootstrap()
-        log.info("İlk tarama (bootstrap sonrası, ZigZag eşik=%.4f)...", threshold)
-        scan_and_store(None)
-        log.info("Canlı polling başlıyor — her kapanan mumda yeniden taranacak.")
+        log.info("İlk tarama (ZigZag eşik=%.4f)...", threshold)
+        process_new_candle(None)
+        stats = store.lifecycle_stats(symbol, interval)
+        log.info("Lifecycle dağılımı (%s %s): %s", symbol, interval, stats)
+        log.info("Canlı polling başlıyor...")
         poller.poll_loop()
     finally:
         client.close()
-        total = store.count_setups(symbol, interval)
+        if tg is not None:
+            tg.close()
+        stats = store.lifecycle_stats(symbol, interval)
         store.close()
-        log.info("Temiz kapanış. DB'de toplam %d setup (%s %s).", total, symbol, interval)
+        log.info("Temiz kapanış. Lifecycle dağılımı: %s", stats)
     return 0
 
 
