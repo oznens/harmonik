@@ -168,3 +168,27 @@ CREATE TABLE IF NOT EXISTS karakter_scores (
 
 CREATE INDEX IF NOT EXISTS idx_karakter_scores_top
     ON karakter_scores (karakter_score DESC);
+
+
+-- ============================================================
+-- Faz 7: Learning Journal + Kiraz (AI notları)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS journal_entries (
+    date              TEXT PRIMARY KEY,  -- YYYY-MM-DD UTC
+    detected_count    INTEGER NOT NULL,
+    closed_count      INTEGER NOT NULL,
+    tp_count          INTEGER NOT NULL,
+    stop_count        INTEGER NOT NULL,
+    eo_count          INTEGER NOT NULL,
+    zi_count          INTEGER NOT NULL,
+    win_rate          REAL,
+    metrics_json      TEXT NOT NULL,     -- tüm kırılımlar
+    best_pattern      TEXT,
+    worst_pattern     TEXT,
+    ai_yorum          TEXT,
+    ai_ders           TEXT,
+    ai_yarin_risk     TEXT,
+    ai_model          TEXT,
+    written_at        INTEGER NOT NULL
+);

@@ -28,6 +28,10 @@ _load_dotenv()
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
+# Anthropic / Kiraz ayarları (.env'den)
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+KIRAZ_MODEL = os.environ.get("KIRAZ_MODEL", "claude-opus-4-7").strip()
+
 MEXC_REST_BASE = "https://api.mexc.com"
 
 # MEXC v3 kline aralık değerleri: 1m, 5m, 15m, 30m, 60m, 4h, 1d, 1W, 1M

@@ -378,6 +378,72 @@ class Store:
             return None
         return float(row[0] or 0), int(row[1] or 0)
 
+    # ---- journal (Faz 7) ----
+
+    def upsert_journal(
+        self, date: str, entry, ai_notes=None, ai_model: str | None = None,
+    ) -> None:
+        """JournalEntry + opsiyonel KirazNotes → journal_entries upsert.
+
+        Args:
+            date: YYYY-MM-DD
+            entry: terminal.learning.journal.JournalEntry
+            ai_notes: terminal.learning.kiraz.KirazNotes veya None
+            ai_model: kullanılan Claude modeli (örn. "claude-opus-4-7")
+        """
+        from dataclasses import asdict
+        # JournalEntry'i serialize et — by_pattern vs için OutcomeBreakdown'lar dict'e dönsün
+        metrics = {
+            "by_pattern":     {k: asdict(v) for k, v in entry.by_pattern.items()},
+            "by_interval":    {k: asdict(v) for k, v in entry.by_interval.items()},
+            "by_direction":   {k: asdict(v) for k, v in entry.by_direction.items()},
+            "by_q_category":  {k: asdict(v) for k, v in entry.by_q_category.items()},
+            "best_pattern_wr": entry.best_pattern_wr,
+            "worst_pattern_wr": entry.worst_pattern_wr,
+        }
+        self._conn.execute(
+            """INSERT INTO journal_entries
+                 (date, detected_count, closed_count, tp_count, stop_count, eo_count, zi_count,
+                  win_rate, metrics_json, best_pattern, worst_pattern,
+                  ai_yorum, ai_ders, ai_yarin_risk, ai_model, written_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(date) DO UPDATE SET
+                  detected_count=excluded.detected_count,
+                  closed_count=excluded.closed_count,
+                  tp_count=excluded.tp_count, stop_count=excluded.stop_count,
+                  eo_count=excluded.eo_count, zi_count=excluded.zi_count,
+                  win_rate=excluded.win_rate, metrics_json=excluded.metrics_json,
+                  best_pattern=excluded.best_pattern, worst_pattern=excluded.worst_pattern,
+                  ai_yorum=COALESCE(excluded.ai_yorum, journal_entries.ai_yorum),
+                  ai_ders=COALESCE(excluded.ai_ders, journal_entries.ai_ders),
+                  ai_yarin_risk=COALESCE(excluded.ai_yarin_risk, journal_entries.ai_yarin_risk),
+                  ai_model=COALESCE(excluded.ai_model, journal_entries.ai_model),
+                  written_at=excluded.written_at
+            """,
+            (
+                date, entry.detected_count, entry.closed_count,
+                entry.tp, entry.stop, entry.eo, entry.zi,
+                entry.win_rate, json.dumps(metrics),
+                entry.best_pattern, entry.worst_pattern,
+                ai_notes.yorum if ai_notes else None,
+                ai_notes.ders if ai_notes else None,
+                ai_notes.yarin_risk_modu if ai_notes else None,
+                ai_model,
+                int(time.time() * 1000),
+            ),
+        )
+
+    def get_journal(self, date: str) -> sqlite3.Row | None:
+        cur = self._conn.execute("SELECT * FROM journal_entries WHERE date = ?", (date,))
+        return cur.fetchone()
+
+    def list_journals(self, limit: int = 30) -> list[sqlite3.Row]:
+        cur = self._conn.execute(
+            "SELECT * FROM journal_entries ORDER BY date DESC LIMIT ?",
+            (limit,),
+        )
+        return cur.fetchall()
+
     def lifecycle_stats(self, symbol: str | None = None, interval: str | None = None) -> dict[str, int]:
         sql = """SELECT l.state, COUNT(*) as n FROM setup_lifecycle l
                  JOIN setups s ON s.id = l.setup_id WHERE 1=1"""

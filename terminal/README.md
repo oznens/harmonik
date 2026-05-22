@@ -24,7 +24,7 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 | 4 | Q skoru + HTF-LTF kontrol | ✓ tamam |
 | 5 | Parite Karakter Laboratuvarı | ✓ tamam |
 | 6 | PySide6 masaüstü UI (MVP) | ✓ tamam |
-| 7 | Learning Journal + Kiraz (AI notları) | bekliyor |
+| 7 | Learning Journal + Kiraz (AI notları) | ✓ tamam |
 | 8 | Ölçek (75 parite) + denetim arayüzü | bekliyor |
 
 ## Kullanım
@@ -193,6 +193,42 @@ DB'de veri yoksa boş açılır. Önce `run_live.py` veya `karakter_lab.py` ile 
 
 > Premium UI özellikleri (Trade Playback, Scanner Journal, Visual Memory) ileri fazlarda eklenecek.
 
+### Learning Journal + Kiraz (Faz 7)
+
+Günlük defter: her gün metrik özetlenir, opsiyonel olarak **Kiraz** (Claude API) ile yorumlanır ve `journal_entries` tablosuna yazılır.
+
+**Metrikler:**
+- O gün tespit edilen + sonuçlanan setup sayıları
+- TP / STOP / EO / ZI dağılımı
+- Win Rate (TP / (TP+STOP); zamansal hariç)
+- Pattern × TF × yön × Q-kategori kırılımı
+- En iyi / en zayıf çalışan yapı (min 3 kararlı örneklem)
+
+**Kiraz (Claude API ile yapılandırılmış çıktı):**
+- `yorum` — bugünün genel resmi (2-4 cümle, metrik-temelli)
+- `ders` — somut, çıkarımsal ders (1-3 cümle)
+- `yarın için risk modu` — yarın için aksiyon önerisi (1-2 cümle)
+
+Resmi `anthropic` SDK + `messages.parse()` + Pydantic schema kullanır. Varsayılan model: `claude-opus-4-7` (adaptive thinking). `KIRAZ_MODEL` env ile değiştirilebilir.
+
+```bash
+# .env'e ekle (sadece local):
+# ANTHROPIC_API_KEY=sk-ant-...
+
+# Bugünü yaz (Kiraz dahil)
+python -m terminal.cli.write_journal --date 2026-05-22 --verbose
+
+# Sadece istatistik, AI yok
+python -m terminal.cli.write_journal --no-ai
+
+# Son 7 günü toplu işle
+python -m terminal.cli.write_journal --last-n 7
+```
+
+Cron önerisi: her gün UTC 00:05'te `--date $(date -u +%Y-%m-%d -d yesterday)`.
+
+API key yoksa, `--no-ai` olmadan çağrı yine de çalışır; Kiraz atlanır, sadece istatistik yazılır.
+
 ## Klasör yapısı
 
 ```
@@ -221,6 +257,9 @@ terminal/
 │   ├── runner.py        # toplu lab koşusu (parite × TF taraması)
 │   ├── score.py         # outcome agregasyon → karakter skoru
 │   └── reports.py       # top sıralamalar (parite/pattern/kombinasyon)
+├── learning/
+│   ├── journal.py       # JournalEntry + JournalGenerator (DB → metrikler)
+│   └── kiraz.py         # Claude API ile AI yorumcu (Pydantic schema)
 ├── ui/
 │   ├── app.py           # PySide6 QApplication + tema
 │   ├── main_window.py   # QMainWindow + 3 sekme + timer refresh
@@ -245,7 +284,8 @@ terminal/
     ├── tg_setup.py      # Faz 3 (Telegram chat_id keşfi)
     ├── run_live.py      # Faz 3+4 (veri + tespit + lifecycle + Telegram + Q)
     ├── karakter_lab.py  # Faz 5 (toplu backtest, karakter skor)
-    └── run_ui.py        # Faz 6 (PySide6 masaüstü UI)
+    ├── run_ui.py        # Faz 6 (PySide6 masaüstü UI)
+    └── write_journal.py # Faz 7 (Learning Journal + Kiraz)
 
 tests/
 ├── synthetic.py         # bilinen oranlardan sentetik XABCD kline üretici
