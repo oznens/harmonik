@@ -33,7 +33,17 @@ class KarakterTab(QWidget):
         refresh_btn = QPushButton("Yenile")
         refresh_btn.clicked.connect(self.refresh)
 
+        self.backtest_btn = QPushButton("🧪 Backtest Çalıştır")
+        self.backtest_btn.clicked.connect(self._on_backtest)
+        self.backtest_btn.setStyleSheet(
+            "QPushButton { background-color: #d4a72c; color: #0e0e10; "
+            "font-weight: bold; padding: 6px 16px; }"
+            "QPushButton:hover { background-color: #e6b840; }"
+        )
+
         toolbar = QHBoxLayout()
+        toolbar.addWidget(self.backtest_btn)
+        toolbar.addSpacing(20)
         toolbar.addWidget(QLabel("Yön:"))
         toolbar.addWidget(self.direction_filter)
         toolbar.addWidget(QLabel("Min örneklem:"))
@@ -84,3 +94,9 @@ class KarakterTab(QWidget):
             elif r.karakter_score < 30:
                 items[10].setForeground(QColor(RED))
             self.model.appendRow(items)
+
+    def _on_backtest(self) -> None:
+        from terminal.ui.widgets.backtest_dialog import BacktestDialog
+        dlg = BacktestDialog(self)
+        dlg.finished_ok.connect(self.refresh)
+        dlg.exec()
