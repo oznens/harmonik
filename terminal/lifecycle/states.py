@@ -11,10 +11,8 @@ EO = "EO"   # Entry Olmadı
 
 TERMINAL_STATES = {TP, STOP, ZI, EO}
 
-# Varsayılan zaman aşımları (mum sayısı, D pivotundan/entry'den itibaren).
-# Carney "PRZ'de fiyat hızlı dönmeli" der ama bazen bir hafta beklenir.
-# 60m: aday=100 mum (~4 gün) makul; aktif=160 mum (~6.5 gün).
+# Varsayılan zaman aşımları (mum sayısı, D pivotundan/entry'den itibaren)
 DEFAULT_TIMEOUTS = {
-    "aday_bars":  100,   # D pivot'tan sonra bu kadar mumda entry yoksa → EO
-    "aktif_bars": 160,   # Entry'den sonra bu kadar mumda TP/SL yoksa → ZI
+    "aday_bars":  60,    # D pivot'tan sonra bu kadar mumda entry yoksa → EO
+    "aktif_bars": 120,   # Entry'den sonra bu kadar mumda TP/SL yoksa → ZI
 }
