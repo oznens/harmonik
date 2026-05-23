@@ -42,6 +42,22 @@ class SetupRow:
     detected_at: int
     htf_aligned: bool | None
     elenen: bool
+    source: str = "live"  # 'live' veya 'backtest'
+
+
+@dataclass
+class RunSummary:
+    run_id: int
+    started_at: int
+    finished_at: int | None
+    bars_per_pair: int
+    sample_count: int
+    tp: int
+    stop: int
+    eo: int
+    zi: int
+    open_count: int
+    win_rate: float  # 0-100
 
 
 @dataclass
@@ -94,14 +110,16 @@ class DataProvider:
     # ---- setups tab ----
 
     def setups(self, states: list[str] | None = None, limit: int = 500,
-               symbol: str | None = None, interval: str | None = None) -> list[SetupRow]:
+               symbol: str | None = None, interval: str | None = None,
+               source: str | None = None) -> list[SetupRow]:
         sql = """
             SELECT s.id, s.symbol, s.interval, s.pattern_name, s.direction,
                    COALESCE(l.state, 'Aday') AS state,
                    s.q_score, s.q_category,
                    s.entry, s.stop, s.tp1,
                    s.d_time, s.d_price, s.detected_at,
-                   s.htf_aligned, s.elenen
+                   s.htf_aligned, s.elenen,
+                   COALESCE(l.source, 'live') AS source
             FROM setups s
             LEFT JOIN setup_lifecycle l ON l.setup_id = s.id
             WHERE 1=1
@@ -115,10 +133,49 @@ class DataProvider:
             sql += " AND s.symbol = ?"; params.append(symbol)
         if interval:
             sql += " AND s.interval = ?"; params.append(interval)
+        if source:
+            sql += " AND COALESCE(l.source, 'live') = ?"; params.append(source)
         sql += " ORDER BY s.detected_at DESC, s.d_time DESC LIMIT ?"
         params.append(limit)
         cur = self.store._conn.execute(sql, params)
         return [_row_to_setup(r) for r in cur.fetchall()]
+
+    # ---- backtest run özetleri ----
+
+    def list_runs(self) -> list[RunSummary]:
+        cur = self.store._conn.execute(
+            """SELECT r.id, r.started_at, r.finished_at, r.bars_per_pair
+               FROM karakter_runs r ORDER BY r.started_at DESC"""
+        )
+        runs = []
+        for row in cur.fetchall():
+            rid = int(row[0])
+            stats = self._run_outcome_stats(rid)
+            decided = stats["TP"] + stats["STOP"]
+            wr = (stats["TP"] / decided * 100) if decided else 0.0
+            runs.append(RunSummary(
+                run_id=rid,
+                started_at=int(row[1]),
+                finished_at=int(row[2]) if row[2] else None,
+                bars_per_pair=int(row[3]),
+                sample_count=sum(stats.values()),
+                tp=stats["TP"], stop=stats["STOP"],
+                eo=stats["EO"], zi=stats["ZI"],
+                open_count=stats["Aktif"] + stats["Aday"],
+                win_rate=wr,
+            ))
+        return runs
+
+    def _run_outcome_stats(self, run_id: int) -> dict[str, int]:
+        cur = self.store._conn.execute(
+            """SELECT outcome, COUNT(*) FROM karakter_samples
+               WHERE run_id = ? GROUP BY outcome""",
+            (run_id,),
+        )
+        stats = {"TP": 0, "STOP": 0, "EO": 0, "ZI": 0, "Aktif": 0, "Aday": 0}
+        for outcome, n in cur.fetchall():
+            stats[outcome] = int(n)
+        return stats
 
     # ---- karakter tab ----
 
@@ -153,4 +210,5 @@ def _row_to_setup(r) -> SetupRow:
         d_time=int(r[11]), d_price=float(r[12]), detected_at=int(r[13]),
         htf_aligned=bool(r[14]) if r[14] is not None else None,
         elenen=bool(r[15]),
+        source=r[16] if len(r) > 16 else "live",
     )

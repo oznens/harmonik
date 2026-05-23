@@ -50,6 +50,13 @@ class Store:
         for col, definition in needed:
             if col not in existing:
                 self._conn.execute(f"ALTER TABLE setups ADD COLUMN {col} {definition}")
+        # setup_lifecycle migrasyonu (source kolonu)
+        cur = self._conn.execute("PRAGMA table_info(setup_lifecycle)")
+        lc_cols = {row[1] for row in cur.fetchall()}
+        if "source" not in lc_cols:
+            self._conn.execute(
+                "ALTER TABLE setup_lifecycle ADD COLUMN source TEXT NOT NULL DEFAULT 'live'"
+            )
 
     def upsert_kline(self, symbol: str, interval: str, k: dict[str, Any]) -> None:
         self._conn.execute(
@@ -229,23 +236,25 @@ class Store:
     def upsert_lifecycle(
         self, setup_id: int, state: str, state_changed_at: int,
         entered_at: int | None = None, exited_at: int | None = None,
-        exit_reason: str | None = None,
+        exit_reason: str | None = None, source: str | None = None,
     ) -> None:
-        """Lifecycle satırı upsert. entered_at None ise mevcut değer korunur."""
-        # COALESCE: yeni değer None ise eski değer kalır
+        """Lifecycle satırı upsert. entered_at/source None ise mevcut değer korunur."""
+        # source default 'live' — INSERT'te eklemiyorsak DEFAULT devreye girer.
         self._conn.execute(
             """
             INSERT INTO setup_lifecycle
-              (setup_id, state, state_changed_at, entered_at, exited_at, exit_reason)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (setup_id, state, state_changed_at, entered_at, exited_at, exit_reason, source)
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 'live'))
             ON CONFLICT(setup_id) DO UPDATE SET
               state = excluded.state,
               state_changed_at = excluded.state_changed_at,
               entered_at = COALESCE(excluded.entered_at, setup_lifecycle.entered_at),
               exited_at  = COALESCE(excluded.exited_at,  setup_lifecycle.exited_at),
-              exit_reason = COALESCE(excluded.exit_reason, setup_lifecycle.exit_reason)
+              exit_reason = COALESCE(excluded.exit_reason, setup_lifecycle.exit_reason),
+              source = COALESCE(?, setup_lifecycle.source)
             """,
-            (setup_id, state, state_changed_at, entered_at, exited_at, exit_reason),
+            (setup_id, state, state_changed_at, entered_at, exited_at, exit_reason,
+             source, source),
         )
 
     def get_lifecycle(self, setup_id: int) -> sqlite3.Row | None:
@@ -321,6 +330,7 @@ class Store:
             entered_at=outcome.entered_time,
             exited_at=outcome.exited_time,
             exit_reason=f"lab run #{run_id}" if state in ("TP", "STOP", "EO", "ZI") else None,
+            source="backtest",
         )
 
         # 3) Karakter sample tablosuna da yaz (lab-spesifik istatistik)

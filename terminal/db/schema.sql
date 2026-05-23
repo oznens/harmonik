@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS setup_lifecycle (
     notified_aday     INTEGER NOT NULL DEFAULT 0,
     notified_aktif    INTEGER NOT NULL DEFAULT 0,
     notified_exit     INTEGER NOT NULL DEFAULT 0,
+    source            TEXT NOT NULL DEFAULT 'live',  -- 'live' veya 'backtest'
     FOREIGN KEY (setup_id) REFERENCES setups(id) ON DELETE CASCADE
 );
 
