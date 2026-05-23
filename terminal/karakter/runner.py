@@ -87,6 +87,10 @@ def run_lab(
                 future = klines[d_idx + 1:]
                 if not future:
                     continue
+                # Lab: detected_at = D pivot zamanı (kronolojik gerçek tespit anı)
+                # — scan_klines bunu int(time.time())'a set ediyor, lab için
+                # tarihsel zaman daha anlamlı
+                s.detected_at = s.pivots["D"].time
                 outcome = simulate_outcome(s, future)
                 store.add_karakter_sample(run_id, s, outcome)
                 total_samples += 1

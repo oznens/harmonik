@@ -307,6 +307,23 @@ class Store:
 
     def add_karakter_sample(self, run_id: int, setup: "Setup", outcome) -> None:
         # outcome: SimOutcome (terminal.karakter.simulator)
+
+        # 1) Setup'ı setups tablosuna yaz (idempotent — aynı pivotlar varsa id döner)
+        setup_id = self.upsert_setup(setup)
+
+        # 2) Outcome'a göre setup_lifecycle güncelle (UI Sonuçlar sekmesinde görünsün)
+        state = outcome.outcome
+        state_changed_at = outcome.exited_time or outcome.entered_time or setup.detected_at
+        self.upsert_lifecycle(
+            setup_id=setup_id,
+            state=state,
+            state_changed_at=state_changed_at,
+            entered_at=outcome.entered_time,
+            exited_at=outcome.exited_time,
+            exit_reason=f"lab run #{run_id}" if state in ("TP", "STOP", "EO", "ZI") else None,
+        )
+
+        # 3) Karakter sample tablosuna da yaz (lab-spesifik istatistik)
         self._conn.execute(
             """INSERT INTO karakter_samples
                (run_id, symbol, interval, pattern_name, direction,

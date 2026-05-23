@@ -60,24 +60,31 @@ def _klines_from_db(store: Store, setup: Setup,
 
 def _klines_from_mexc(setup: Setup,
                      padding_before: int = 10, padding_after: int = 30) -> list[dict] | None:
-    """MEXC'den gerekli pencereyi çek (paginated)."""
+    """MEXC'den gerekli pencereyi çek (paginated, doğru tarih aralığı).
+
+    Geçmiş tarihli setup'lar için: klines_paginated'e end_time_ms parametresi
+    geçerek doğru zaman penceresinin sonundan geriye doğru çek.
+    """
     interval_ms = _INTERVAL_MS.get(setup.interval, 3_600_000)
     x_time = setup.pivots["X"].time
     d_time = setup.pivots["D"].time
-    total_span = (d_time - x_time) // interval_ms + padding_before + padding_after + 20
-    bars_needed = max(int(total_span), 100)
+    start_t = x_time - padding_before * interval_ms
+    end_t = d_time + padding_after * interval_ms
+    bars_needed = int((end_t - start_t) // interval_ms) + 30  # ekstra tampon
+    bars_needed = max(bars_needed, 100)
     try:
         client = MexcClient()
         try:
-            klines = client.klines_paginated(setup.symbol, setup.interval,
-                                             bars_needed, throttle=0.05)
+            klines = client.klines_paginated(
+                setup.symbol, setup.interval,
+                bars_needed,
+                end_time_ms=end_t,
+                throttle=0.05,
+            )
         finally:
             client.close()
     except MexcError:
         return None
-    # Penceredeki mumları filtrele
-    start_t = x_time - padding_before * interval_ms
-    end_t = d_time + padding_after * interval_ms
     return [k for k in klines if start_t <= k["open_time"] <= end_t]
 
 
