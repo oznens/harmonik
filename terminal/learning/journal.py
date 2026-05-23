@@ -7,25 +7,16 @@ istatistik üretip not düşülebilir (--no-ai modu).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 
 from terminal.db.store import Store
+from terminal.timeutil import (
+    day_bounds_ms,
+    parse_local_date as parse_date,
+    today_local as today_utc,  # geriye uyumlu isim
+)
 
-
-def parse_date(s: str) -> datetime:
-    """YYYY-MM-DD → UTC midnight datetime."""
-    return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-
-
-def day_bounds_ms(date: str) -> tuple[int, int]:
-    """Verilen YYYY-MM-DD için [start_ms, end_ms) UTC sınırları."""
-    start = parse_date(date)
-    end = start + timedelta(days=1)
-    return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
-
-
-def today_utc() -> str:
-    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+# parse_date ve day_bounds_ms timeutil'den import edilir; eski testler için
+# aynı isimler altında dışa açılır.
 
 
 @dataclass
@@ -143,8 +134,9 @@ class JournalGenerator:
 
 def format_metrics_for_prompt(entry: JournalEntry) -> str:
     """JournalEntry'i Claude'a metin olarak özetler (yapılandırılmış prompt için)."""
+    from terminal.timeutil import TZ_TAG
     lines = [
-        f"Tarih: {entry.date} (UTC)",
+        f"Tarih: {entry.date} ({TZ_TAG})",
         f"Bugün tespit edilen setup: {entry.detected_count}",
         f"Bugün sonuçlanan setup: {entry.closed_count}",
         f"  TP: {entry.tp}, STOP: {entry.stop}, EO (Entry Olmadı): {entry.eo}, ZI (Zamansal İptal): {entry.zi}",

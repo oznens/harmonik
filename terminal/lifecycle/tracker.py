@@ -62,9 +62,21 @@ class LifecycleTracker:
         self.on_transition = on_transition
         self._aday_to = aday_bars_timeout
         self._aktif_to = aktif_bars_timeout
+        # backfill sırasında True olur → on_transition'a iletilmez
+        self._silent = False
 
-    def register_new(self, setup: Setup, setup_id: int) -> None:
-        """Yeni tespit edilen setup'ı Aday durumunda başlat."""
+    def register_new(self, setup: Setup, setup_id: int,
+                     klines: list[dict[str, Any]] | None = None) -> None:
+        """Yeni tespit edilen setup'ı Aday durumunda başlat.
+
+        Eğer `klines` verilirse, D pivot'tan sonraki tüm mumlar sırayla
+        işlenerek setup'ın güncel doğru durumu hesaplanır (backfill). Bu
+        sayede tarihsel setup'lar (D pivot eskidir) "yanlışlıkla EO" olarak
+        işaretlenmez — gerçek geçişler (TP/STOP/EO/ZI) yakalanır.
+
+        Backfill sırasında on_transition geçici olarak susturulur — eski
+        transition'lar Telegram'a gitmesin.
+        """
         existing = self.store.get_lifecycle(setup_id)
         if existing is not None:
             return  # zaten kayıtlı
@@ -80,6 +92,49 @@ class LifecycleTracker:
                              ev_time=setup.detected_at, price=None,
                              notes="aday tespit edildi")
         self._emit(Transition(setup, None, ADAY, None, setup.detected_at, "aday tespit"))
+
+        if klines:
+            self._backfill(setup, setup_id, klines)
+
+    def _backfill(self, setup: Setup, setup_id: int,
+                  klines: list[dict[str, Any]]) -> None:
+        """D pivot sonrasındaki tüm mumları sırayla işle (silent).
+
+        Bu metod register_new sırasında çağrılır. Telegram emit'i kapatılır
+        çünkü tarihsel transition'lar bildirim üretmemelidir.
+        """
+        d_time = setup.pivots["D"].time
+        d_idx = next((i for i, k in enumerate(klines) if k["open_time"] == d_time), None)
+        if d_idx is None or d_idx >= len(klines) - 1:
+            return
+
+        interval_ms = self._interval_ms()
+        self._silent = True
+        try:
+            for i in range(d_idx + 1, len(klines)):
+                bar = klines[i]
+                row = self.store.get_lifecycle(setup_id)
+                if row is None:
+                    break
+                state = row["state"]
+                if state in TERMINAL_STATES:
+                    break
+
+                bars_since_d = max(0, (bar["open_time"] - d_time) // interval_ms)
+
+                if state == ADAY:
+                    self._check_aday(setup, setup_id, bar["high"], bar["low"],
+                                     bar["open_time"], bars_since_d)
+                elif state == AKTIF:
+                    entered_at = row["entered_at"]
+                    bars_since_entry = (
+                        max(0, (bar["open_time"] - entered_at) // interval_ms)
+                        if entered_at else 0
+                    )
+                    self._check_aktif(setup, setup_id, bar["high"], bar["low"],
+                                      bar["open_time"], bars_since_entry)
+        finally:
+            self._silent = False
 
     def advance(self, klines: list[dict[str, Any]]) -> list[Transition]:
         """Yeni kapanan mum(lar) gelince açık tüm setup'lar için durumu ilerlet.
@@ -194,7 +249,7 @@ class LifecycleTracker:
         return trans
 
     def _emit(self, trans: Transition) -> None:
-        if self.on_transition:
+        if self.on_transition and not self._silent:
             try:
                 self.on_transition(trans)
             except Exception:

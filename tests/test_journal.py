@@ -34,13 +34,17 @@ def store(tmp_path: Path) -> Store:
 def test_parse_date():
     d = parse_date("2026-05-22")
     assert d.year == 2026 and d.month == 5 and d.day == 22
-    assert d.tzinfo == timezone.utc
+    # Artık DISPLAY_TZ (Europe/Istanbul varsayılan) zaman dilimi taşır
+    assert d.tzinfo is not None
 
 
 def test_day_bounds_ms():
     start, end = day_bounds_ms("2026-05-22")
+    # 24 saatlik aralık (DST yoksa)
     assert end - start == 24 * 3600 * 1000
-    expected_start = int(datetime(2026, 5, 22, tzinfo=timezone.utc).timestamp() * 1000)
+    # Start, local midnight'a karşılık gelmeli
+    from terminal.timeutil import TZ
+    expected_start = int(datetime(2026, 5, 22, tzinfo=TZ).timestamp() * 1000)
     assert start == expected_start
 
 

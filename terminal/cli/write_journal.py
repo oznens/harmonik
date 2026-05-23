@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from terminal.db.store import Store
 from terminal.learning.journal import (
@@ -25,16 +25,17 @@ from terminal.learning.journal import (
     format_metrics_for_prompt,
     today_utc,
 )
+from terminal.timeutil import now_local, yesterday_local
 
 
 def _yesterday_utc() -> str:
-    return (datetime.now(tz=timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    return yesterday_local()
 
 
 def _print_summary(date: str, entry: JournalEntry, notes=None) -> None:
     print()
     print("=" * 70)
-    print(f"  Learning Journal — {date} (UTC)")
+    print(f"  Learning Journal — {date}")
     print("=" * 70)
     print(format_metrics_for_prompt(entry))
     if notes:
@@ -108,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.last_n:
-            today = datetime.now(tz=timezone.utc)
+            today = now_local()
             written = 0
             for i in range(args.last_n):
                 d = (today - timedelta(days=i)).strftime("%Y-%m-%d")

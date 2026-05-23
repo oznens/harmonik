@@ -1,8 +1,6 @@
 """Setup'lar sekmesi — Aktif + Aday tablosu, sağda detay paneli."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
@@ -10,6 +8,7 @@ from PySide6.QtWidgets import (
     QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
+from terminal.timeutil import format_local_short
 from terminal.ui.data_provider import DataProvider, SetupRow
 from terminal.ui.widgets.detail_panel import DetailPanel
 
@@ -17,7 +16,7 @@ COLUMNS = ["Parite", "TF", "Pattern", "Yön", "Durum", "Q", "Entry", "SL", "TP1"
 
 
 def _fmt(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%m-%d %H:%M")
+    return format_local_short(ms)
 
 
 class SetupsTab(QWidget):

@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
 from typing import Any, Callable
 
 from terminal.config import BUFFER_SIZE, POLL_INTERVAL_SECONDS
 from terminal.data.buffer import KlineBuffer
 from terminal.data.mexc_client import MexcClient, MexcError
 from terminal.db.store import Store
+from terminal.timeutil import format_local
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _now_ms() -> int:
 
 
 def _fmt_ts(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return format_local(ms)
 
 
 class KlinePoller:

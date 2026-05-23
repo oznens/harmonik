@@ -9,16 +9,16 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
 
 from terminal.cli.run_data import _normalize_interval
 from terminal.data.mexc_client import MexcClient
 from terminal.db.store import Store
 from terminal.detection.scanner import default_threshold, scan_klines
+from terminal.timeutil import format_local
 
 
 def _fmt(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return format_local(ms)
 
 
 def main(argv: list[str] | None = None) -> int:

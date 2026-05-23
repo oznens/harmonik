@@ -17,7 +17,6 @@ import argparse
 import logging
 import signal
 import sys
-from datetime import datetime, timezone
 from typing import Any
 
 from terminal.cli.run_data import _normalize_interval
@@ -32,12 +31,13 @@ from terminal.quality.htf_ltf import htf_for
 from terminal.telegram_bot.cards import aday_card, aktif_card, exit_card
 from terminal.telegram_bot.charts import render_setup_chart
 from terminal.telegram_bot.client import TelegramClient, TelegramError
+from terminal.timeutil import format_local
 
 log = logging.getLogger(__name__)
 
 
 def _fmt(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return format_local(ms)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
                 tag = "YENI" if d_time >= klines[-3]["open_time"] else "TARIHSEL"
                 log.info("[%s] tespit: %s | D@%s | id=%d",
                          tag, s.summary(), _fmt(d_time), setup_id)
-                tracker.register_new(s, setup_id)
+                tracker.register_new(s, setup_id, klines=klines)
 
         # 2) Açık setup'ları ilerlet
         transitions = tracker.advance(klines)

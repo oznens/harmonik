@@ -6,9 +6,9 @@ Bütün metodlar saf veri döndürür (UI bağımsız), kolayca test edilebilir.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from terminal.db.store import Store
+from terminal.timeutil import start_of_today_ms
 
 
 @dataclass
@@ -59,12 +59,6 @@ class KarakterRow:
     karakter_score: float
 
 
-def _start_of_today_ms() -> int:
-    now = datetime.now(tz=timezone.utc)
-    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return int(midnight.timestamp() * 1000)
-
-
 class DataProvider:
     """UI sorgu katmanı. Store'u sarmalayıp UI-spesifik agregeler döner."""
 
@@ -91,7 +85,7 @@ class DataProvider:
         # Bugün tespit edilen
         sc.bugun_setup = c.execute(
             "SELECT COUNT(*) FROM setups WHERE detected_at >= ?",
-            (_start_of_today_ms(),),
+            (start_of_today_ms(),),
         ).fetchone()[0]
         decided = sc.tp + sc.stop
         sc.win_rate = (sc.tp / decided * 100) if decided > 0 else 0.0

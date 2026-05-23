@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -10,13 +9,14 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from terminal.timeutil import format_local
 from terminal.ui.data_provider import DataProvider, SetupRow
 
 log = logging.getLogger(__name__)
 
 
 def _fmt(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return format_local(ms)
 
 
 OVERRIDE_OPTIONS = ["TP", "STOP", "EO", "ZI", "Aday", "Aktif"]

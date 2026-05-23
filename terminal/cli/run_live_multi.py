@@ -17,7 +17,6 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +32,13 @@ from terminal.quality.htf_ltf import htf_for
 from terminal.telegram_bot.cards import aday_card, aktif_card, exit_card
 from terminal.telegram_bot.charts import render_setup_chart
 from terminal.telegram_bot.client import TelegramClient, TelegramError
+from terminal.timeutil import format_local
 
 log = logging.getLogger(__name__)
 
 
 def _fmt(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return format_local(ms)
 
 
 class PairWorker:
@@ -131,7 +131,7 @@ class PairWorker:
                 d_time = s.pivots["D"].time
                 tag = "YENI" if d_time >= klines[-3]["open_time"] else "TARIHSEL"
                 log.info("%s [%s] %s | id=%d", self._tag, tag, s.summary(), sid)
-                self.tracker.register_new(s, sid)
+                self.tracker.register_new(s, sid, klines=klines)
         self.tracker.advance(klines)
 
     def run(self) -> None:

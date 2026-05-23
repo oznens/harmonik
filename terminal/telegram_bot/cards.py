@@ -1,13 +1,12 @@
 """Setup → Telegram mesaj kartı formatlayıcısı (Markdown)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from terminal.detection.models import Setup
+from terminal.timeutil import format_local
 
 
 def _fmt(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return format_local(ms)
 
 
 def _arrow(direction: str) -> str:
