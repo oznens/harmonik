@@ -182,15 +182,24 @@ class LifecycleTracker:
 
     def _check_aday(self, setup: Setup, setup_id: int,
                     h: float, l: float, t: int, bars_since_d: int) -> Transition | None:
-        # Entry tetiklendi mi?
+        # Agresif giriş: PRZ'ye ilk dokunuşta tetik
+        #   Bull setup: fiyat aşağı PRZ'ye iniyor → bar.low <= prz_high
+        #   Bear setup: fiyat yukarı PRZ'ye çıkıyor → bar.high >= prz_low
         if setup.direction == "bull":
-            triggered = l <= setup.entry  # fiyat PRZ'ye girdi (en azından entry seviyesine değdi)
+            trigger_price = setup.prz_high
+            triggered = l <= trigger_price
         else:
-            triggered = h >= setup.entry
+            trigger_price = setup.prz_low
+            triggered = h >= trigger_price
         if triggered:
-            return self._transition(setup, setup_id, ADAY, AKTIF, setup.entry, t,
-                                    notes=f"entry tetiklendi (bar high={h} low={l})",
-                                    entered_at=t)
+            trans1 = self._transition(
+                setup, setup_id, ADAY, AKTIF, trigger_price, t,
+                notes=f"PRZ'ye dokundu (bar high={h:.6g} low={l:.6g})",
+                entered_at=t,
+            )
+            # Aynı barda SL veya TP de vurulmuş olabilir → hemen kontrol et
+            trans2 = self._check_aktif(setup, setup_id, h, l, t, bars_since_entry=0)
+            return trans2 if trans2 else trans1
         # Zaman aşımı
         if bars_since_d >= self._aday_to:
             return self._transition(setup, setup_id, ADAY, EO, None, t,
