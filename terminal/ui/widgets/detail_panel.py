@@ -54,6 +54,10 @@ class DetailPanel(QFrame):
         self._override_panel.setVisible(False)
         opl = QHBoxLayout(self._override_panel)
         opl.setContentsMargins(8, 4, 8, 8)
+        self._chart_btn = QPushButton("📈 Grafiği Aç")
+        self._chart_btn.clicked.connect(self._on_open_chart)
+        opl.addWidget(self._chart_btn)
+        opl.addSpacing(12)
         opl.addWidget(QLabel("Outcome düzelt:"))
         self._override_buttons: list[QPushButton] = []
         for state in OVERRIDE_OPTIONS:
@@ -165,6 +169,23 @@ class DetailPanel(QFrame):
                 html += '<br>'
             html += '</div>'
         self._content.setText(html)
+
+    def _on_open_chart(self) -> None:
+        if self._current_setup_id is None or self._provider is None:
+            return
+        setup = self._provider.store.load_setup(self._current_setup_id)
+        if setup is None:
+            QMessageBox.warning(self, "Hata", "Setup yüklenemedi.")
+            return
+        # Lazy import — mplfinance ağır, sadece chart açılırken yükle
+        from terminal.ui.widgets.chart_window import ChartWindow
+        try:
+            win = ChartWindow(setup, self._provider.store, parent=self)
+            if win.isVisible() or win.windowTitle():
+                win.exec()
+        except Exception as e:
+            log.exception("ChartWindow açma hatası")
+            QMessageBox.critical(self, "Hata", f"Grafik penceresi açılamadı: {e}")
 
     def _on_override(self, new_state: str) -> None:
         if self._current_setup_id is None or self._provider is None:

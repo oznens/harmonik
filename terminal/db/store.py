@@ -492,7 +492,7 @@ class Store:
     def get_overrides(self, setup_id: int) -> list[sqlite3.Row]:
         cur = self._conn.execute(
             """SELECT * FROM outcome_overrides WHERE setup_id = ?
-               ORDER BY created_at DESC""",
+               ORDER BY created_at DESC, id DESC""",
             (setup_id,),
         )
         return cur.fetchall()
