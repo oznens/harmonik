@@ -19,16 +19,19 @@ from terminal.quality.score import compute_q
 
 log = logging.getLogger(__name__)
 
-# TF başı varsayılan ZigZag eşikleri (yüzde olarak)
+# TF başı varsayılan ZigZag eşikleri (yüzde olarak).
+# Carney pivot'ları elle belirler; ZigZag eşiği bizim tahminimiz. Aşağıdaki
+# değerler test edilmiş tatlı nokta: yeterince hassas (küçük pivot'ları
+# kaçırmıyor) ama gürültüye boğmuyor.
 DEFAULT_THRESHOLDS: dict[str, float] = {
-    "1m": 0.003,
-    "5m": 0.005,
-    "15m": 0.010,
-    "30m": 0.015,
-    "60m": 0.020,
-    "4h":  0.030,
-    "1d":  0.050,
-    "1W":  0.080,
+    "1m":  0.0025,
+    "5m":  0.0040,
+    "15m": 0.0075,
+    "30m": 0.0110,
+    "60m": 0.0150,
+    "4h":  0.0220,
+    "1d":  0.0400,
+    "1W":  0.0700,
 }
 
 
