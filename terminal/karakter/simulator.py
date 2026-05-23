@@ -46,16 +46,23 @@ def simulate_outcome(
     entered_time: int | None = None
     bull = setup.direction == "bull"
 
+    # Agresif PRZ girişi (live tracker ile aynı kural):
+    #   Bull: bar.low <= prz_high (PRZ üst kenarına ilk dokunuş)
+    #   Bear: bar.high >= prz_low (PRZ alt kenarına ilk dokunuş)
+    entry_trigger = setup.prz_high if bull else setup.prz_low
+
     for i, bar in enumerate(future_klines):
         if state == "Aday":
-            triggered = (bull and bar["low"] <= setup.entry) or \
-                        (not bull and bar["high"] >= setup.entry)
+            triggered = (bull and bar["low"] <= entry_trigger) or \
+                        (not bull and bar["high"] >= entry_trigger)
             if triggered:
                 state = "Aktif"
                 entered_idx = i
                 entered_time = bar["open_time"]
-                # Entry barında TP/SL kontrolü: bu barda da hit olabilir
-                # (aşağıdaki Aktif bloğuna devam edilecek — `continue` yok)
+                # GİRİŞ BARINDA TP/SL kontrol ETME — bar içinde hangi yön
+                # önce gitti bilinmediği için TP/SL'yi aynı barda eşleştirmek
+                # yanıltıcı (yüksek WR artefaktı). Sonraki barlardan başla.
+                continue
             elif i >= aday_timeout:
                 return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
                                   exited_idx=i, exited_time=bar["open_time"])

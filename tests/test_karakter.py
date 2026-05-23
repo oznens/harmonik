@@ -75,12 +75,34 @@ def test_simulate_stop_after_entry():
     assert o.outcome == "STOP"
 
 
-def test_simulate_ambiguous_same_bar_tp_and_sl():
-    s, _ = _gartley_setup()
+def test_simulate_entry_bar_no_same_bar_outcome():
+    """Giriş barında TP/SL aynı bar içinde olsa bile kontrol ETMEMELİ —
+    bar içi sıralama (TP mi önce SL mi önce) bilinmediği için yanıltıcı."""
+    s, _ = _gartley_setup()  # bull setup
+    base_t = 1_700_000_000_000
+    # Bull setup: stop ALTTA, tp1 ÜSTTE
+    future = [
+        {"open_time": base_t, "close_time": base_t + 3_599_999,
+         "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5, "close": s.entry,
+         "volume": 100, "quote_volume": 1000},
+    ]
+    o = simulate_outcome(s, future)
+    # Aynı bar entry: Aktif olur ama TP/SL bir sonraki bara ertelenir
+    assert o.outcome == "Aktif"
+
+
+def test_simulate_ambiguous_next_bar_tp_and_sl():
+    """Giriş bir sonraki barda hem TP hem SL aynı bar içinde olursa
+    konservatif olarak STOP işaretlenir (ambiguous=True)."""
+    s, _ = _gartley_setup()  # bull setup
     base_t = 1_700_000_000_000
     future = [
-        # Aynı bar: entry tetiklendi VE hem TP hem SL hit. Konservatif → STOP.
+        # Bar 1: sadece entry tetik (low <= prz_high)
         {"open_time": base_t, "close_time": base_t + 3_599_999,
+         "open": s.entry, "high": s.entry, "low": s.entry - 0.01, "close": s.entry,
+         "volume": 100, "quote_volume": 1000},
+        # Bar 2: Bull setup için → high yukarıda (TP1), low aşağıda (SL)
+        {"open_time": base_t + 3_600_000, "close_time": base_t + 7_199_999,
          "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5, "close": s.entry,
          "volume": 100, "quote_volume": 1000},
     ]
