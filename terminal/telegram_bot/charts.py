@@ -121,12 +121,12 @@ def render_setup_chart(setup: Setup, klines: list[dict[str, Any]]) -> bytes:
             ax.plot([a_pt[0], b_pt[0]], [a_pt[1], b_pt[1]],
                     linestyle="--", color=DASH, linewidth=1.4, zorder=5)
 
-    # 3) Pivot daireleri — büyük, kalın etiketli
+    # 3) Pivot daireleri — küçük, sade etiketli
     for letter, (x_idx, price) in pivot_data.items():
-        ax.scatter([x_idx], [price], s=800, color=PIVOT_CIRCLE_FACE,
-                   edgecolor=PIVOT_CIRCLE_EDGE, linewidth=2.0, zorder=10)
+        ax.scatter([x_idx], [price], s=320, color=PIVOT_CIRCLE_FACE,
+                   edgecolor=PIVOT_CIRCLE_EDGE, linewidth=1.2, zorder=10)
         ax.text(x_idx, price, letter, ha="center", va="center",
-                fontsize=15, fontweight="bold", color="#000", zorder=11)
+                fontsize=9, fontweight="bold", color="#000", zorder=11)
 
     # 4) PRZ ("D bölgesi") kutusu — sağ üstte, B noktasından sağa
     if "D" in pivot_data:
@@ -145,9 +145,8 @@ def render_setup_chart(setup: Setup, klines: list[dict[str, Any]]) -> bytes:
         )
         ax.add_patch(rect)
         # D? etiketi (PRZ kutusunun sağ üst köşesi)
-        ax.text(right_edge - 0.5, setup.prz_high,
-                "D?" if setup.direction == "bear" else "D?",
-                ha="right", va="bottom", fontsize=13, fontweight="bold",
+        ax.text(right_edge - 0.5, setup.prz_high, "D?",
+                ha="right", va="bottom", fontsize=10, fontweight="bold",
                 color=PRZ_EDGE, zorder=12)
 
     # 5) Entry / SL / TP yatay çizgileri (sade, transparan)
