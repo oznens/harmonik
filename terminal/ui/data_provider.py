@@ -84,10 +84,12 @@ class DataProvider:
     # ---- status bar ----
 
     def status_counts(self) -> StatusCounts:
+        """Üst status bar — SADECE LIVE setup'ları sayar (backtest dahil değil)."""
         c = self.store._conn
         sc = StatusCounts()
         cur = c.execute(
-            """SELECT l.state, COUNT(*) FROM setup_lifecycle l GROUP BY l.state""",
+            """SELECT l.state, COUNT(*) FROM setup_lifecycle l
+               WHERE l.source = 'live' GROUP BY l.state""",
         )
         for state, n in cur.fetchall():
             n = int(n)
@@ -97,10 +99,16 @@ class DataProvider:
             elif state == "STOP": sc.stop = n
             elif state == "EO":   sc.eo = n
             elif state == "ZI":   sc.zi = n
-        sc.toplam = c.execute("SELECT COUNT(*) FROM setups").fetchone()[0]
-        # Bugün tespit edilen
+        # Toplam ve bugünkü: source='live' olanlar (lifecycle'sız → default 'live')
+        sc.toplam = c.execute(
+            """SELECT COUNT(*) FROM setups s
+               LEFT JOIN setup_lifecycle l ON l.setup_id = s.id
+               WHERE COALESCE(l.source, 'live') = 'live'"""
+        ).fetchone()[0]
         sc.bugun_setup = c.execute(
-            "SELECT COUNT(*) FROM setups WHERE detected_at >= ?",
+            """SELECT COUNT(*) FROM setups s
+               LEFT JOIN setup_lifecycle l ON l.setup_id = s.id
+               WHERE COALESCE(l.source, 'live') = 'live' AND s.detected_at >= ?""",
             (start_of_today_ms(),),
         ).fetchone()[0]
         decided = sc.tp + sc.stop
