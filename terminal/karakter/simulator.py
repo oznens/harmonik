@@ -46,10 +46,10 @@ def simulate_outcome(
     entered_time: int | None = None
     bull = setup.direction == "bull"
 
-    # Agresif PRZ girişi (live tracker ile aynı kural):
-    #   Bull: bar.low <= prz_high (PRZ üst kenarına ilk dokunuş)
-    #   Bear: bar.high >= prz_low (PRZ alt kenarına ilk dokunuş)
-    entry_trigger = setup.prz_high if bull else setup.prz_low
+    # Carney tutucu girişi (live tracker ile aynı kural): D ideal seviyesi.
+    #   Bull: bar.low <= setup.entry
+    #   Bear: bar.high >= setup.entry
+    entry_trigger = setup.entry
 
     for i, bar in enumerate(future_klines):
         if state == "Aday":
