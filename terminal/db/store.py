@@ -444,6 +444,62 @@ class Store:
         )
         return cur.fetchall()
 
+    # ---- outcome override (Faz 8) ----
+
+    def override_outcome(
+        self, setup_id: int, override_state: str, reason: str = "",
+    ) -> None:
+        """Bir setup'ın outcome'unu manuel düzelt.
+
+        - outcome_overrides tablosuna audit kaydı ekler (eski state'i de saklar)
+        - setup_lifecycle.state'i günceller
+        - setup_events'a "manuel düzeltme" girişi düşer
+        """
+        # Mevcut state'i al
+        row = self.get_lifecycle(setup_id)
+        original = row["state"] if row else None
+        if original == override_state:
+            return  # değişiklik yok
+
+        now = int(time.time() * 1000)
+        self._conn.execute(
+            """INSERT INTO outcome_overrides (setup_id, original_state, override_state, reason, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (setup_id, original or "?", override_state, reason or "", now),
+        )
+        # Lifecycle state güncelle
+        if row is not None:
+            self._conn.execute(
+                """UPDATE setup_lifecycle
+                   SET state = ?, state_changed_at = ?, exit_reason = ?
+                   WHERE setup_id = ?""",
+                (override_state, now, f"manuel: {reason}" if reason else "manuel düzeltme", setup_id),
+            )
+        else:
+            self.upsert_lifecycle(
+                setup_id=setup_id, state=override_state,
+                state_changed_at=now,
+                exit_reason=f"manuel: {reason}" if reason else "manuel düzeltme",
+            )
+        # Audit event
+        self._conn.execute(
+            """INSERT INTO setup_events (setup_id, event_time, prev_state, new_state, trigger_price, notes)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (setup_id, now, original, override_state, None,
+             f"manuel düzeltme: {reason}" if reason else "manuel düzeltme"),
+        )
+
+    def get_overrides(self, setup_id: int) -> list[sqlite3.Row]:
+        cur = self._conn.execute(
+            """SELECT * FROM outcome_overrides WHERE setup_id = ?
+               ORDER BY created_at DESC""",
+            (setup_id,),
+        )
+        return cur.fetchall()
+
+    def count_overrides(self) -> int:
+        return int(self._conn.execute("SELECT COUNT(*) FROM outcome_overrides").fetchone()[0])
+
     def lifecycle_stats(self, symbol: str | None = None, interval: str | None = None) -> dict[str, int]:
         sql = """SELECT l.state, COUNT(*) as n FROM setup_lifecycle l
                  JOIN setups s ON s.id = l.setup_id WHERE 1=1"""

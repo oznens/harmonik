@@ -44,6 +44,7 @@ class SetupsTab(QWidget):
         self.table.clicked.connect(self._on_row_clicked)
 
         self.detail = DetailPanel()
+        self.detail.outcome_overridden.connect(lambda _sid: self.refresh())
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.table)

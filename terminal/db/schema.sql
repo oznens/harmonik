@@ -192,3 +192,23 @@ CREATE TABLE IF NOT EXISTS journal_entries (
     ai_model          TEXT,
     written_at        INTEGER NOT NULL
 );
+
+
+-- ============================================================
+-- Faz 8: Outcome denetim (manuel doğrulama)
+-- ============================================================
+
+-- Bir setup'ın otomatik outcome'unu manuel olarak override etmek için.
+-- Aynı setup birden fazla kez override edilebilir (audit izi); en yeni geçerli.
+CREATE TABLE IF NOT EXISTS outcome_overrides (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    setup_id          INTEGER NOT NULL,
+    original_state    TEXT NOT NULL,
+    override_state    TEXT NOT NULL,
+    reason            TEXT,
+    created_at        INTEGER NOT NULL,
+    FOREIGN KEY (setup_id) REFERENCES setups(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_outcome_overrides_setup
+    ON outcome_overrides (setup_id, created_at DESC);

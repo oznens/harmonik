@@ -1,12 +1,13 @@
-"""Setup detay paneli (sağ panel): metin bilgileri + opsiyonel mini chart."""
+"""Setup detay paneli (sağ panel): metin bilgileri + outcome düzeltme."""
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QInputDialog, QLabel, QMessageBox,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from terminal.ui.data_provider import DataProvider, SetupRow
@@ -18,14 +19,25 @@ def _fmt(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+OVERRIDE_OPTIONS = ["TP", "STOP", "EO", "ZI", "Aday", "Aktif"]
+
+
 class DetailPanel(QFrame):
-    """Seçilen setup'ın detayını gösterir. show_setup(row, provider) ile güncellenir."""
+    """Seçilen setup'ın detayını gösterir. show_setup(row, provider) ile güncellenir.
+
+    Sinyal `outcome_overridden` outcome düzeltildiğinde yayınlanır — üst widget
+    tabloyu yenilesin diye.
+    """
+
+    outcome_overridden = Signal(int)  # setup_id
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         from terminal.ui.styles import BG_PANEL, BORDER
         self.setStyleSheet(f"background-color: {BG_PANEL}; border: 1px solid {BORDER};")
         self.setMinimumWidth(380)
+        self._current_setup_id: int | None = None
+        self._provider: DataProvider | None = None
 
         self._content = QLabel("Bir setup seçin")
         self._content.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -37,11 +49,29 @@ class DetailPanel(QFrame):
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._content)
 
+        # Outcome düzeltme paneli (alt)
+        self._override_panel = QFrame()
+        self._override_panel.setVisible(False)
+        opl = QHBoxLayout(self._override_panel)
+        opl.setContentsMargins(8, 4, 8, 8)
+        opl.addWidget(QLabel("Outcome düzelt:"))
+        self._override_buttons: list[QPushButton] = []
+        for state in OVERRIDE_OPTIONS:
+            btn = QPushButton(state)
+            btn.clicked.connect(lambda _checked=False, s=state: self._on_override(s))
+            opl.addWidget(btn)
+            self._override_buttons.append(btn)
+        opl.addStretch()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(scroll)
+        layout.addWidget(scroll, 1)
+        layout.addWidget(self._override_panel)
 
     def show_setup(self, row: SetupRow, provider: DataProvider) -> None:
+        self._current_setup_id = row.id
+        self._provider = provider
+        self._override_panel.setVisible(True)
         setup = provider.store.load_setup(row.id)
         if setup is None:
             self._content.setText("(Setup yüklenemedi)")
@@ -123,4 +153,36 @@ class DetailPanel(QFrame):
             Tespit edildi: {_fmt(setup.detected_at)}
         </div>
         """
+        # Override geçmişi varsa ekle
+        overrides = provider.store.get_overrides(row.id)
+        if overrides:
+            html += '<hr><div><b>Manuel Düzeltmeler:</b><br>'
+            for ov in overrides[:5]:
+                html += (f'&nbsp;&nbsp;{_fmt(ov["created_at"])}: '
+                         f'<b>{ov["original_state"]}</b> → <b>{ov["override_state"]}</b>')
+                if ov["reason"]:
+                    html += f' — <i>{ov["reason"]}</i>'
+                html += '<br>'
+            html += '</div>'
         self._content.setText(html)
+
+    def _on_override(self, new_state: str) -> None:
+        if self._current_setup_id is None or self._provider is None:
+            return
+        reason, ok = QInputDialog.getText(
+            self, "Outcome Düzelt",
+            f"Bu setup'ı '{new_state}' olarak işaretle. Neden (opsiyonel):",
+        )
+        if not ok:
+            return
+        try:
+            self._provider.store.override_outcome(
+                self._current_setup_id, new_state, reason.strip()
+            )
+            self.outcome_overridden.emit(self._current_setup_id)
+            QMessageBox.information(
+                self, "Düzeltildi",
+                f"Setup #{self._current_setup_id} → {new_state}",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Hata", f"Düzeltme başarısız: {e}")

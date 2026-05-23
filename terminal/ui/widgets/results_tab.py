@@ -56,6 +56,7 @@ class ResultsTab(QWidget):
         toolbar.addStretch()
 
         self.detail = DetailPanel()
+        self.detail.outcome_overridden.connect(lambda _sid: self.refresh())
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.table)
         splitter.addWidget(self.detail)

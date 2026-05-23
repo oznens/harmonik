@@ -25,7 +25,7 @@ Harmonik formasyon tabanlı kripto sinyal terminali. Her şey Python.
 | 5 | Parite Karakter Laboratuvarı | ✓ tamam |
 | 6 | PySide6 masaüstü UI (MVP) | ✓ tamam |
 | 7 | Learning Journal + Kiraz (AI notları) | ✓ tamam |
-| 8 | Ölçek (75 parite) + denetim arayüzü | bekliyor |
+| 8 | Ölçek (çok parite eşzamanlı) + outcome denetimi | ✓ tamam |
 
 ## Kullanım
 
@@ -229,6 +229,42 @@ Cron önerisi: her gün UTC 00:05'te `--date $(date -u +%Y-%m-%d -d yesterday)`.
 
 API key yoksa, `--no-ai` olmadan çağrı yine de çalışır; Kiraz atlanır, sadece istatistik yazılır.
 
+### Ölçek + Denetim (Faz 8)
+
+**Çok parite × çok TF eşzamanlı canlı tarama:**
+
+```bash
+# Inline parite listesi
+python -m terminal.cli.run_live_multi \
+    --symbols BTCUSDT,ETHUSDT,SOLUSDT,AVAXUSDT \
+    --intervals 15m,30m,60m,4h
+
+# Dosyadan parite listesi (her satırda bir, # ile yorum)
+python -m terminal.cli.run_live_multi --symbols-file pairs.txt --intervals 60m,4h
+
+# Düşük Q + elenen filtresi
+python -m terminal.cli.run_live_multi --symbols-file pairs.txt --intervals 60m,4h \
+    --min-q 60 --include-elenen
+```
+
+Her (parite, TF) kombinasyonu kendi thread'inde çalışır:
+- KlinePoller + LifecycleTracker thread-local
+- SQLite WAL modu paralel yazımları handle eder
+- Telegram client paylaşımlı (httpx.Client thread-safe)
+- `--stagger-ms 200` (varsayılan) ile bootstrap'lar arası gecikme → MEXC rate limit'i tampona alır
+
+**MEXC rate limit notu:** 75 parite × 4 TF = 300 worker, her biri 10sn polling → ~30 istek/sn.
+MEXC public limit ~20/sn. 50+ parite için poll periyodunu artırmak veya parite/TF sayısını azaltmak gerekebilir.
+
+**Outcome denetim arayüzü (UI):**
+
+Detay panelinde her setup için outcome düzeltme butonları (TP / STOP / EO / ZI / Aday / Aktif). Düzeltme nedeniyle birlikte `outcome_overrides` tablosuna audit kaydı yazılır; aynı setup birden fazla kez düzeltilebilir, tüm geçmiş paneldeki "Manuel Düzeltmeler" bölümünde görünür.
+
+Düzeltme:
+1. `outcome_overrides` tablosuna (orijinal state, yeni state, neden, zaman)
+2. `setup_lifecycle.state`'i günceller
+3. `setup_events`'e "manuel düzeltme" audit girişi düşer
+
 ## Klasör yapısı
 
 ```
@@ -285,7 +321,8 @@ terminal/
     ├── run_live.py      # Faz 3+4 (veri + tespit + lifecycle + Telegram + Q)
     ├── karakter_lab.py  # Faz 5 (toplu backtest, karakter skor)
     ├── run_ui.py        # Faz 6 (PySide6 masaüstü UI)
-    └── write_journal.py # Faz 7 (Learning Journal + Kiraz)
+    ├── write_journal.py # Faz 7 (Learning Journal + Kiraz)
+    └── run_live_multi.py # Faz 8 (çok parite × çok TF eşzamanlı)
 
 tests/
 ├── synthetic.py         # bilinen oranlardan sentetik XABCD kline üretici
