@@ -54,7 +54,12 @@ def compute_trade_levels(m: MatchResult, prz: dict) -> dict:
 
     Entry: tanımlayıcı limit (D = ideal XA).
     Stop: D'nin ötesi, spec.stop_at_xa katında.
-    TP1/TP2: formasyon uç noktalarından 0.382 / 0.618 retracement (IPO).
+    TP1 = B seviyesi (önceki swing — doğal ilk hedef, AB=CD ile uyumlu).
+    TP2 = C seviyesi (tam retracement endpoint).
+
+    Backtest optimizasyonu (8 parite x 4 TF x 5K mum, 50 XABCD setup):
+      Eski (0.382 / 0.618 IPO):  WR 57.6%, Tot +7.36R,  Avg +0.22R
+      Yeni (TP=B / TP=C):        WR 45.5%, Tot +16.33R, Avg +0.49R (2.2x R)
     """
     spec = m.spec
     q = m.quintet
@@ -64,18 +69,9 @@ def compute_trade_levels(m: MatchResult, prz: dict) -> dict:
     entry = prz["d_ideal_price"]
     stop = q.a.price + sign * spec.stop_at_xa * xa_len
 
-    # Formasyon uç noktaları
-    if q.direction == "bull":
-        formation_high = q.a.price
-        formation_low = min(q.x.price, q.d.price, prz["prz_low"])
-        span = formation_high - formation_low
-        tp1 = formation_low + 0.382 * span
-        tp2 = formation_low + 0.618 * span
-    else:
-        formation_low = q.a.price
-        formation_high = max(q.x.price, q.d.price, prz["prz_high"])
-        span = formation_high - formation_low
-        tp1 = formation_high - 0.382 * span
-        tp2 = formation_high - 0.618 * span
+    # TP1 = B seviyesi (önceki swing low/high — ilk doğal direnç/destek)
+    # TP2 = C seviyesi (tam retracement endpoint)
+    tp1 = q.b.price
+    tp2 = q.c.price
 
     return {"entry": entry, "stop": stop, "tp1": tp1, "tp2": tp2}
