@@ -52,6 +52,7 @@ class PairWorker:
         interval: str,
         tg: TelegramClient | None,
         min_q: int,
+        min_karakter: float,
         include_elenen: bool,
         no_chart: bool,
         use_htf: bool,
@@ -62,6 +63,7 @@ class PairWorker:
         self.interval = interval
         self.tg = tg
         self.min_q = min_q
+        self.min_karakter = min_karakter
         self.include_elenen = include_elenen
         self.no_chart = no_chart
         self.use_htf = use_htf
@@ -86,6 +88,15 @@ class PairWorker:
                 return
             if t.setup.q_score and t.setup.q_score < self.min_q:
                 return
+            # Karakter skoru filtresi: backtest verisi varsa ve düşükse Telegram'a gitme
+            if self.min_karakter > 0 and self.store is not None:
+                kar = self.store.get_karakter_score(
+                    t.setup.symbol, t.setup.interval, t.setup.pattern_name, t.setup.direction,
+                )
+                # Karakter verisi var (sample >= 1) ve düşükse → atla
+                if kar is not None and kar[1] >= 2 and kar[0] < self.min_karakter:
+                    log.debug("%s karakter %.1f < %.1f, atlandı", self._tag, kar[0], self.min_karakter)
+                    return
             latest = self.poller.buffer.latest if self.poller else None
             if latest is not None:
                 age = (latest["open_time"] - t.setup.pivots["D"].time) // self.tracker._interval_ms()
@@ -200,6 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-telegram", action="store_true")
     parser.add_argument("--no-chart", action="store_true")
     parser.add_argument("--min-q", type=int, default=0)
+    parser.add_argument("--min-karakter", type=float, default=0.0,
+                        help="Karakter skoru bu eşiğin altında olan (parite, TF, pattern, yön) "
+                             "kombinasyonlarını Telegram'a gönderme. Backtest verisi yoksa "
+                             "geçer (yeni kombinasyon ihtimaline karşı).")
     parser.add_argument("--include-elenen", action="store_true")
     parser.add_argument("--no-htf", action="store_true")
     parser.add_argument("--log-level", default="INFO")
@@ -242,7 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     for idx, (sym, iv) in enumerate(combos):
         w = PairWorker(
             symbol=sym, interval=iv, tg=tg,
-            min_q=args.min_q, include_elenen=args.include_elenen,
+            min_q=args.min_q, min_karakter=args.min_karakter,
+            include_elenen=args.include_elenen,
             no_chart=args.no_chart, use_htf=not args.no_htf,
             zigzag_threshold=args.zigzag,
             startup_delay=idx * (args.stagger_ms / 1000.0),
