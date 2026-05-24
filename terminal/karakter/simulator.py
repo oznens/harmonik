@@ -56,12 +56,20 @@ def simulate_outcome(
             triggered = (bull and bar["low"] <= entry_trigger) or \
                         (not bull and bar["high"] >= entry_trigger)
             if triggered:
+                # Reversal confirmation: entry barında SL de touch ediliyorsa
+                # fiyat PRZ'ye değip aynı bar'da SL'i geçti — reversal yok,
+                # gerçek live'da bu setupta kullanıcı emir koymaz (pasif giriş
+                # stratejisi: reversal candle gerek). EO olarak işaretle.
+                sl_touched_same_bar = (bull and bar["low"] <= setup.stop) or \
+                                       (not bull and bar["high"] >= setup.stop)
+                if sl_touched_same_bar:
+                    return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                                      exited_idx=i, exited_time=bar["open_time"])
                 state = "Aktif"
                 entered_idx = i
                 entered_time = bar["open_time"]
-                # GİRİŞ BARINDA TP/SL kontrol ETME — bar içinde hangi yön
-                # önce gitti bilinmediği için TP/SL'yi aynı barda eşleştirmek
-                # yanıltıcı (yüksek WR artefaktı). Sonraki barlardan başla.
+                # Entry barında TP kontrol ETME — bar içinde hangi yön önce
+                # gitti bilinmediği için TP'yi aynı barda eşleştirmek yanıltıcı.
                 continue
             elif i >= aday_timeout:
                 return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,

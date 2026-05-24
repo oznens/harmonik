@@ -75,19 +75,31 @@ def test_simulate_stop_after_entry():
     assert o.outcome == "STOP"
 
 
-def test_simulate_entry_bar_no_same_bar_outcome():
-    """Giriş barında TP/SL aynı bar içinde olsa bile kontrol ETMEMELİ —
-    bar içi sıralama (TP mi önce SL mi önce) bilinmediği için yanıltıcı."""
+def test_simulate_entry_bar_sl_touched_skips_to_eo():
+    """Giriş barında fiyat hem entry'ye hem SL'e değiyorsa reversal yok —
+    pasif giriş stratejisi: kullanıcı bu setupta emir koymaz. EO işaretle."""
     s, _ = _gartley_setup()  # bull setup
     base_t = 1_700_000_000_000
-    # Bull setup: stop ALTTA, tp1 ÜSTTE
     future = [
         {"open_time": base_t, "close_time": base_t + 3_599_999,
          "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5, "close": s.entry,
          "volume": 100, "quote_volume": 1000},
     ]
     o = simulate_outcome(s, future)
-    # Aynı bar entry: Aktif olur ama TP/SL bir sonraki bara ertelenir
+    assert o.outcome == "EO"
+
+
+def test_simulate_entry_bar_only_entry_touched_active():
+    """Giriş barında sadece entry touch, SL touch yok → Aktif (TP kontrolü sonraki barda)."""
+    s, _ = _gartley_setup()  # bull setup
+    base_t = 1_700_000_000_000
+    future = [
+        # low entry'ye değdi ama stop'a değmedi; high tp'ye değdi ama bu sayılmaz
+        {"open_time": base_t, "close_time": base_t + 3_599_999,
+         "open": s.entry, "high": s.tp1 + 0.5, "low": s.entry - 0.01,
+         "close": s.entry, "volume": 100, "quote_volume": 1000},
+    ]
+    o = simulate_outcome(s, future)
     assert o.outcome == "Aktif"
 
 
