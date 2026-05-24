@@ -17,8 +17,16 @@ from dataclasses import dataclass
 from terminal.detection.models import Setup
 from terminal.detection.pivots import Pivot
 
-# Standart AB=CD oranları (Carney)
-AB_CD_RATIOS = (1.0, 1.13, 1.27, 1.414, 1.618, 2.0, 2.24, 2.618, 3.14, 3.618)
+# AB=CD oranları — Carney spec'inde 10 oran var (1.0, 1.13, 1.27, 1.414, 1.618,
+# 2.0, 2.24, 2.618, 3.14, 3.618). BTC+ETH 15m 3-ay backtest verisinde net
+# negatif R üreten oranlar (1.13, 2.0, 2.24, 2.618, 3.618) tespit listesinden
+# çıkarıldı — toplam -10.65R kayıp veriyorlardı. Aktif tutulanlar:
+#   1.0   (N=49 WR=45.0% TotR=+17.02) — ana güç
+#   1.27  (N=20 WR=70.0% TotR=+10.24) — en yüksek WR
+#   1.414 (N=20 WR=55.6% TotR= +5.96)
+#   1.618 (N=21 WR=44.4% TotR= +1.12) — golden ratio, marjinal pozitif
+#   3.14  (N= 5 WR=80.0% TotR= +0.41) — sample az ama negatif değil
+AB_CD_RATIOS = (1.0, 1.27, 1.414, 1.618, 3.14)
 AB_CD_TOLERANCE = 0.10
 
 # C noktası AB retracement aralığı (tüm AB=CD'lerde)
