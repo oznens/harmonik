@@ -149,13 +149,33 @@ def render_setup_chart(setup: Setup, klines: list[dict[str, Any]]) -> bytes:
                 ha="right", va="bottom", fontsize=10, fontweight="bold",
                 color=PRZ_EDGE, zorder=12)
 
-    # 5) Entry / SL / TP yatay çizgileri (sade, transparan)
-    ax.axhline(setup.entry, color=ENTRY_COLOR, linewidth=1.0,
-               linestyle="-", alpha=0.5, zorder=3)
-    ax.axhline(setup.stop, color=SL_COLOR, linewidth=0.9,
-               linestyle="--", alpha=0.45, zorder=3)
-    ax.axhline(setup.tp1, color=TP_COLOR, linewidth=0.9,
-               linestyle="--", alpha=0.45, zorder=3)
+    # 5) Entry / SL / TP1 / TP2 yatay çizgileri — net + etiketli
+    levels = [
+        ("Entry", setup.entry, ENTRY_COLOR, "-",  1.4),
+        ("SL",    setup.stop,  SL_COLOR,    "--", 1.2),
+        ("TP1",   setup.tp1,   TP_COLOR,    "--", 1.2),
+        ("TP2",   setup.tp2,   TP_COLOR,    ":",  1.0),
+    ]
+    x_right = len(df) - 1
+    for label, price, color, ls, lw in levels:
+        ax.axhline(price, color=color, linewidth=lw,
+                   linestyle=ls, alpha=0.85, zorder=3)
+        # Sağ tarafa renkli etiket kutusu
+        ax.annotate(
+            f" {label}  {price:.6g} ",
+            xy=(x_right, price),
+            xytext=(8, 0), textcoords="offset points",
+            ha="left", va="center",
+            fontsize=9, fontweight="bold",
+            color="#ffffff",
+            bbox=dict(
+                boxstyle="round,pad=0.25",
+                facecolor=color, edgecolor="none",
+                alpha=0.92,
+            ),
+            zorder=20,
+            clip_on=False,
+        )
 
     # 6) Başlık (üstte koyu band)
     direction_text = "Bearish" if setup.direction == "bear" else "Bullish"
