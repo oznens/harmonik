@@ -12,19 +12,28 @@ from dataclasses import dataclass
 FULL_WEIGHT_SAMPLES = 30
 
 
-def trade_r(entry: float, stop: float, tp1: float, outcome: str) -> float:
+def trade_r(entry: float, stop: float, tp1: float, outcome: str,
+            cost_pct: float = 0.0) -> float:
     """R puanı: TP'de +R_potansiyeli, STOP'ta -1R, EO/ZI/Aday/Aktif'te 0.
 
     R potansiyeli = |TP1 - Entry| / |Entry - SL|
+
+    Args:
+        cost_pct: round-trip işlem maliyeti (komisyon + spread), entry'nin
+            yüzdesi olarak. Default 0 (geriye uyumlu — saf teorik R).
+            MEXC spot için ~0.0025 (komisyon %0.2 + spread %0.05) önerilir.
+            Maliyet TP'de R'ı azaltır, STOP'ta R'ı büyütür (|R|>1).
     """
     risk = abs(entry - stop)
     if risk <= 0:
         return 0.0
+    cost = entry * cost_pct  # mutlak fiyat birimi
     if outcome == "TP":
-        reward = abs(tp1 - entry)
-        return round(reward / risk, 4)
+        reward_net = abs(tp1 - entry) - cost
+        return round(reward_net / risk, 4)
     if outcome == "STOP":
-        return -1.0
+        loss_net = risk + cost
+        return round(-loss_net / risk, 4)
     return 0.0
 
 

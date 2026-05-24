@@ -104,7 +104,27 @@ def run_lab(
                 d_idx = _find_d_index(klines, s.pivots["D"].time)
                 if d_idx is None:
                     continue
-                future = klines[d_idx + 1:]
+
+                # LOOK-AHEAD FIX: ZigZag pivot retrospective — D pivot olusturken
+                # backtest ileri bakiyor. Live'da D pivot'un PIVOT oldugu, fiyat
+                # ZigZag eşik kadar D'den uzaklaştigi an anlasilir (genelde 1-2
+                # bar sonra). O ana kadar setup henüz tespit edilmemis sayilir.
+                d_price = s.pivots["D"].price
+                bull = s.direction == "bull"
+                confirm_price = d_price * (1 + threshold) if bull else d_price * (1 - threshold)
+                confirm_idx = None
+                for j in range(d_idx + 1, len(klines)):
+                    bar = klines[j]
+                    if bull and bar["high"] >= confirm_price:
+                        confirm_idx = j
+                        break
+                    if not bull and bar["low"] <= confirm_price:
+                        confirm_idx = j
+                        break
+                if confirm_idx is None:
+                    continue  # D pivot dataset bitene dek dogrulanmadi - atla
+
+                future = klines[confirm_idx + 1:]
                 if not future:
                     continue
                 # Lab: detected_at = D pivot zamanı (kronolojik gerçek tespit anı)
