@@ -198,6 +198,28 @@ def _load_symbols(args) -> list[str]:
     return items
 
 
+def _load_combos_file(path: Path) -> list[tuple[str, str]]:
+    """Parite-TF kombinasyon dosyası: her satırda 'SYMBOL INTERVAL' veya 'SYMBOL,INTERVAL'.
+    # ile başlayan satırlar yorum. Cross-product yapmaz; tam kombinasyon listesi döner.
+    """
+    if not path.exists():
+        raise SystemExit(f"Dosya yok: {path}")
+    raw = path.read_text(encoding="utf-8").splitlines()
+    combos: list[tuple[str, str]] = []
+    for line in raw:
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        # virgül veya boşluk ile ayrılabilir
+        parts = [p.strip() for p in (s.replace(",", " ").split())]
+        if len(parts) != 2:
+            raise SystemExit(f"Hatalı satır: {line!r} (beklenen: 'SYMBOL INTERVAL')")
+        combos.append((parts[0].upper(), _normalize_interval(parts[1])))
+    if not combos:
+        raise SystemExit(f"Kombinasyon listesi boş: {path}")
+    return combos
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="terminal-live-multi",
@@ -205,8 +227,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--symbols", help="Virgülle ayrılmış pariteler")
     parser.add_argument("--symbols-file", help="Her satırda bir parite olan dosya (# yorum)")
-    parser.add_argument("--intervals", required=True,
-                        help="Virgülle ayrılmış aralıklar (örn. 15m,30m,60m,4h)")
+    parser.add_argument("--intervals", help="Virgülle ayrılmış aralıklar (örn. 15m,30m,60m,4h)")
+    parser.add_argument("--combos-file",
+                        help="Parite-TF kombinasyon dosyası: her satırda 'SYMBOL INTERVAL'. "
+                             "Verilirse --symbols/--intervals cross-product'ı yerine bu "
+                             "kombinasyonlar kullanılır. Örnek: data/tracked_combos.txt")
     parser.add_argument("--zigzag", type=float, default=None)
     parser.add_argument("--no-telegram", action="store_true")
     parser.add_argument("--no-chart", action="store_true")
@@ -229,12 +254,21 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    symbols = _load_symbols(args)
-    intervals = [_normalize_interval(i) for i in args.intervals.split(",") if i.strip()]
-    combos = [(s, i) for s in symbols for i in intervals]
-
-    log.info("Toplam %d kombinasyon: %d parite × %d TF",
-             len(combos), len(symbols), len(intervals))
+    # Combos-file > symbols+intervals cross-product
+    if args.combos_file:
+        combos = _load_combos_file(Path(args.combos_file))
+        n_syms = len({c[0] for c in combos})
+        n_tfs = len({c[1] for c in combos})
+        log.info("Toplam %d kombinasyon (combos-file): %d unique parite, %d unique TF",
+                 len(combos), n_syms, n_tfs)
+    else:
+        if not args.intervals:
+            raise SystemExit("--intervals veya --combos-file gerekli")
+        symbols = _load_symbols(args)
+        intervals = [_normalize_interval(i) for i in args.intervals.split(",") if i.strip()]
+        combos = [(s, i) for s in symbols for i in intervals]
+        log.info("Toplam %d kombinasyon: %d parite × %d TF",
+                 len(combos), len(symbols), len(intervals))
 
     # Migration için tek bir Store başlat ve kapat (schema kurulumu)
     Store().close()

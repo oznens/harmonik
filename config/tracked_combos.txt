@@ -1,0 +1,55 @@
+# Önerilen canlı tarama kombinasyonları (parite + TF).
+# Format: SYMBOL INTERVAL (her satırda bir kombinasyon; # ile yorum).
+# Kullanım: python -m terminal.cli.run_live_multi --combos-file config/tracked_combos.txt
+#
+# Kaynak: 15 parite × 3 TF × 3 ay backtest (Mayıs 2026).
+# 38/45 kombinasyon pozitif R; toplam aylık potansiyel ~+159R.
+# Negatif 6 kombinasyon (ETH 60m, SOL 15m, XRP 60m, AVAX 4h, LINK 60m,
+# UNI 4h) ve nötr 1 (TRX 4h) liste dışı.
+# AvgR sıralı; üst sıradakiler en güçlü performans.
+
+# === ŞAMPİYONLAR (aylık ≥ +10R potansiyel parite-TF) ===
+ATOMUSDT 15m
+DOTUSDT  15m
+DOGEUSDT 15m
+ETHUSDT  15m
+LTCUSDT  15m
+NEARUSDT 15m
+UNIUSDT  15m
+ADAUSDT  15m
+AVAXUSDT 15m
+
+# === İYİ (aylık +5R - +10R) ===
+XRPUSDT  15m
+BTCUSDT  15m
+NEARUSDT 60m
+LTCUSDT  60m
+DOTUSDT  60m
+BNBUSDT  15m
+SOLUSDT  4h
+LINKUSDT 15m
+TRXUSDT  15m
+UNIUSDT  60m
+BTCUSDT  60m
+ETHUSDT  4h
+
+# === MAKUL (+1R - +5R) ===
+DOTUSDT  4h
+ATOMUSDT 4h
+SOLUSDT  60m
+BNBUSDT  60m
+ADAUSDT  4h
+BTCUSDT  4h
+ATOMUSDT 60m
+ADAUSDT  60m
+BNBUSDT  4h
+XRPUSDT  4h
+LTCUSDT  4h
+TRXUSDT  60m
+
+# === MARJİNAL (+0R - +1R; izlemeye değer ama düşük katkı) ===
+AVAXUSDT 60m
+LINKUSDT 4h
+NEARUSDT 4h
+DOGEUSDT 60m
+DOGEUSDT 4h
