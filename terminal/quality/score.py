@@ -65,24 +65,33 @@ def _prz_density(setup: Setup) -> float:
 
 
 def _b_precision(setup: Setup) -> float:
-    spec = PATTERNS[setup.pattern_name]
+    if setup.pattern_family != "xabcd":
+        # AB=CD / Shark / 5-0 / Three Drives — B kavramı farklı, neutral puan
+        return W_B * 0.5
+    spec = PATTERNS.get(setup.pattern_name)
+    if spec is None:
+        return W_B * 0.5
     band_center = (spec.b_min + spec.b_max) / 2
     band_radius = (spec.b_max - spec.b_min) / 2
     if band_radius <= 0:
         return W_B
     distance = abs(setup.b_ratio - band_center) / band_radius
-    # merkez → tam, kenar → 0.5 puan
     return W_B * max(0.0, 1 - 0.5 * distance)
 
 
 def _d_precision(setup: Setup) -> float:
-    spec = PATTERNS[setup.pattern_name]
+    if setup.pattern_family != "xabcd":
+        # AB=CD vs için: D'nin standart orana yakınlığı
+        # d_ratio matched_ratio'yu tutuyor; her zaman tam puan (eşleşme zaten doğrulanmış)
+        return W_D * 0.8
+    spec = PATTERNS.get(setup.pattern_name)
+    if spec is None:
+        return W_D * 0.5
     half_width = max(spec.d_ideal - spec.d_min, spec.d_max - spec.d_ideal)
     if half_width <= 0:
         return W_D
     distance = abs(setup.d_ratio - spec.d_ideal)
     normalized = distance / half_width
-    # ideal → tam, band kenarı → ~0.5 puan
     return W_D * max(0.0, 1 - 0.5 * normalized)
 
 
@@ -91,7 +100,11 @@ def _ab_cd(setup: Setup) -> float:
 
 
 def _bc_proj(setup: Setup) -> float:
-    spec = PATTERNS[setup.pattern_name]
+    if setup.pattern_family != "xabcd":
+        return W_BC * 0.5  # AB=CD vs için BC kavramı farklı
+    spec = PATTERNS.get(setup.pattern_name)
+    if spec is None:
+        return 0.0
     if spec.bc_proj_min <= setup.bc_proj <= spec.bc_proj_max:
         return W_BC
     return 0.0

@@ -12,6 +12,7 @@ from typing import Any
 
 from terminal.detection.matcher import match_xabcd
 from terminal.detection.models import Setup
+from terminal.detection.patterns.abcd import build_abcd_setup, match_abcd
 from terminal.detection.pivots import find_pivots
 from terminal.detection.prz import compute_prz, compute_trade_levels
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
@@ -58,7 +59,7 @@ def scan_klines(
     """
     threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
     pivots = find_pivots(klines, threshold)
-    if len(pivots) < 5:
+    if len(pivots) < 4:
         return []
 
     # HTF trendi (tüm setup'lar için aynı, bir kez hesapla)
@@ -69,48 +70,60 @@ def scan_klines(
 
     detected_at = int(time.time() * 1000)
     setups: list[Setup] = []
+    seen_keys: set[tuple] = set()  # aynı pivot kombinasyonu birden fazla pattern olarak eşleşmesin
 
+    # 1) 5-pivot pencerelerde XABCD ailesi (Gartley/Bat/Butterfly/Crab/...)
     for i in range(len(pivots) - 4):
         m = match_xabcd(pivots[i:i + 5])
         if m is None:
             continue
-
+        q = m.quintet
         prz = compute_prz(m)
         levels = compute_trade_levels(m, prz)
-        q = m.quintet
-
         setup = Setup(
-            symbol=symbol,
-            interval=interval,
-            pattern_name=m.spec.name,
-            direction=q.direction,
+            symbol=symbol, interval=interval,
+            pattern_name=m.spec.name, direction=q.direction,
             pivots={"X": q.x, "A": q.a, "B": q.b, "C": q.c, "D": q.d},
-            b_ratio=m.b_ratio,
-            c_ratio=m.c_ratio,
-            d_ratio=m.d_ratio,
-            bc_proj=m.bc_proj,
-            cd_ab_ratio=m.cd_ab_ratio,
+            b_ratio=m.b_ratio, c_ratio=m.c_ratio, d_ratio=m.d_ratio,
+            bc_proj=m.bc_proj, cd_ab_ratio=m.cd_ab_ratio,
             ab_cd_equivalent=m.ab_cd_equivalent,
-            prz_low=prz["prz_low"],
-            prz_high=prz["prz_high"],
+            prz_low=prz["prz_low"], prz_high=prz["prz_high"],
             prz_components=prz["prz_components"],
-            entry=levels["entry"],
-            stop=levels["stop"],
-            tp1=levels["tp1"],
-            tp2=levels["tp2"],
+            entry=levels["entry"], stop=levels["stop"],
+            tp1=levels["tp1"], tp2=levels["tp2"],
             detected_at=detected_at,
-            htf_interval=htf_interval,
-            htf_trend=htf_trend,
+            htf_interval=htf_interval, htf_trend=htf_trend,
+            pattern_family="xabcd",
         )
+        _finalize(setup, htf_trend)
+        setups.append(setup)
+        seen_keys.add((m.spec.name, q.x.time, q.a.time, q.b.time, q.c.time, q.d.time))
 
-        # Q skoru ve HTF uyumu
-        qr = compute_q(setup, htf_trend=htf_trend)
-        setup.q_score = qr.score
-        setup.q_category = qr.category
-        setup.q_components = qr.components
-        setup.htf_aligned = alignment(setup.direction, htf_trend)
-        setup.elenen = setup.htf_aligned is False  # explicit False, neutral değil
-
+    # 2) 4-pivot pencerelerde standalone AB=CD
+    for i in range(len(pivots) - 3):
+        m_abcd = match_abcd(pivots[i:i + 4])
+        if m_abcd is None:
+            continue
+        setup = build_abcd_setup(m_abcd, symbol, interval)
+        setup.detected_at = detected_at
+        setup.htf_interval = htf_interval
+        setup.htf_trend = htf_trend
+        # Aynı pivotları XABCD olarak da eşleşmişse atla (XABCD'nin parçası zaten)
+        key = ("ABCD", setup.pivots["A"].time, setup.pivots["B"].time,
+               setup.pivots["C"].time, setup.pivots["D"].time)
+        if any(k[2:] == key[1:] for k in seen_keys):
+            continue
+        _finalize(setup, htf_trend)
         setups.append(setup)
 
     return setups
+
+
+def _finalize(setup: Setup, htf_trend: str | None) -> None:
+    """Setup'a Q skoru ve HTF uyumu doldur (in-place)."""
+    qr = compute_q(setup, htf_trend=htf_trend)
+    setup.q_score = qr.score
+    setup.q_category = qr.category
+    setup.q_components = qr.components
+    setup.htf_aligned = alignment(setup.direction, htf_trend)
+    setup.elenen = setup.htf_aligned is False

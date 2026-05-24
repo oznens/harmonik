@@ -15,7 +15,7 @@ class Setup:
     pattern_name: str
     direction: str  # "bull" veya "bear"
 
-    # 5 pivot: X, A, B, C, D
+    # 5 pivot: X, A, B, C, D (AB=CD için X = A duplikatı; Shark için X = "0", A = "X", ...)
     pivots: dict[str, Pivot]
 
     # Oran ölçümleri
@@ -46,6 +46,11 @@ class Setup:
     htf_trend: str | None = None                      # "bull" | "bear" | "neutral" | None
     htf_aligned: bool | None = None                   # True/False/None (neutral veya HTF yok)
     elenen: bool = False                              # HTF zıt yön → Elenen havuzu
+
+    # Pattern ailesi: "xabcd" (Gartley/Bat/Crab/Butterfly), "abcd" (4-nokta),
+    # "shark" (0-X-A-B-C), "five_zero" (X-A-B-C-D farklı kural),
+    # "three_drives" (D1-R1-D2-R2-D3). UI/chart bu alana göre render eder.
+    pattern_family: str = "xabcd"
 
     def summary(self) -> str:
         q_part = f" Q={self.q_score}" if self.q_score else ""
