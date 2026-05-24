@@ -58,6 +58,8 @@ class RunSummary:
     zi: int
     open_count: int
     win_rate: float  # 0-100
+    total_r: float = 0.0   # Toplam R kazancı/kaybı (TP'lerden +R, STOP'lardan -1R)
+    avg_r: float = 0.0     # Kararlı işlem başı ortalama R
 
 
 @dataclass
@@ -151,6 +153,7 @@ class DataProvider:
     # ---- backtest run özetleri ----
 
     def list_runs(self) -> list[RunSummary]:
+        from terminal.karakter.score import trade_r
         cur = self.store._conn.execute(
             """SELECT r.id, r.started_at, r.finished_at, r.bars_per_pair
                FROM karakter_runs r ORDER BY r.started_at DESC"""
@@ -161,6 +164,15 @@ class DataProvider:
             stats = self._run_outcome_stats(rid)
             decided = stats["TP"] + stats["STOP"]
             wr = (stats["TP"] / decided * 100) if decided else 0.0
+            # R hesabı
+            rcur = self.store._conn.execute(
+                "SELECT entry, stop, tp1, outcome FROM karakter_samples WHERE run_id = ?",
+                (rid,),
+            )
+            rs = [trade_r(r[0], r[1], r[2], r[3]) for r in rcur.fetchall()]
+            decided_rs = [r for r in rs if r != 0.0]
+            total_r = sum(rs)
+            avg_r = (sum(decided_rs) / len(decided_rs)) if decided_rs else 0.0
             runs.append(RunSummary(
                 run_id=rid,
                 started_at=int(row[1]),
@@ -171,6 +183,8 @@ class DataProvider:
                 eo=stats["EO"], zi=stats["ZI"],
                 open_count=stats["Aktif"] + stats["Aday"],
                 win_rate=wr,
+                total_r=round(total_r, 2),
+                avg_r=round(avg_r, 2),
             ))
         return runs
 

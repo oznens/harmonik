@@ -12,6 +12,22 @@ from dataclasses import dataclass
 FULL_WEIGHT_SAMPLES = 30
 
 
+def trade_r(entry: float, stop: float, tp1: float, outcome: str) -> float:
+    """R puanı: TP'de +R_potansiyeli, STOP'ta -1R, EO/ZI/Aday/Aktif'te 0.
+
+    R potansiyeli = |TP1 - Entry| / |Entry - SL|
+    """
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return 0.0
+    if outcome == "TP":
+        reward = abs(tp1 - entry)
+        return round(reward / risk, 4)
+    if outcome == "STOP":
+        return -1.0
+    return 0.0
+
+
 @dataclass
 class KarakterStats:
     sample_count: int  # toplam setup (her durum)

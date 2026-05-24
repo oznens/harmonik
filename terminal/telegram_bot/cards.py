@@ -90,6 +90,8 @@ def aktif_card(setup: Setup, trigger_price: float, trigger_time: int) -> str:
 
 def exit_card(setup: Setup, outcome: str, exit_price: float, exit_time: int) -> str:
     """Çıkış kartı: TP / STOP / Zamansal İptal / Entry Olmadı."""
+    from terminal.karakter.score import trade_r
+
     s = setup
     badge_map = {
         "TP":   "✅ *TP*",
@@ -98,10 +100,12 @@ def exit_card(setup: Setup, outcome: str, exit_price: float, exit_time: int) -> 
         "EO":   "⚪ *ENTRY OLMADI*",
     }
     badge = badge_map.get(outcome, outcome)
+    r_value = trade_r(s.entry, s.stop, s.tp1, outcome)
     if outcome in ("TP", "STOP"):
         pct = _abs_pct(exit_price, s.entry)
         sign = "+" if (outcome == "TP") else "-"
-        outcome_line = f"{badge}  ({sign}{pct:.2f}%)"
+        r_sign = "+" if r_value > 0 else ""
+        outcome_line = f"{badge}  ({sign}{pct:.2f}% · {r_sign}{r_value:.2f}R)"
     else:
         outcome_line = badge
     return (

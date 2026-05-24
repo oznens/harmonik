@@ -63,17 +63,20 @@ class KarakterTab(QWidget):
         run_row.addWidget(self.run_selector)
         run_row.addStretch()
 
-        # --- Run özet kartları (4 sayaç) ---
+        # --- Run özet kartları ---
         self.card_total, self.lbl_total = _stat_card("ÖRNEKLEM", "0")
         self.card_tp, self.lbl_tp = _stat_card("TP", "0", "#26a69a")
         self.card_stop, self.lbl_stop = _stat_card("STOP", "0", "#ef5350")
         self.card_wr, self.lbl_wr = _stat_card("WIN RATE", "—", "#26a69a")
+        self.card_total_r, self.lbl_total_r = _stat_card("TOPLAM R", "—", "#d4a72c")
+        self.card_avg_r, self.lbl_avg_r = _stat_card("ORT. R/İŞLEM", "—", "#d4a72c")
         self.card_eo, self.lbl_eo = _stat_card("ENTRY YOK", "0", "#888")
         self.card_zi, self.lbl_zi = _stat_card("ZAMANSAL", "0", "#888")
 
         cards_row = QHBoxLayout()
         cards_row.setSpacing(8)
         for c in [self.card_total, self.card_tp, self.card_stop, self.card_wr,
+                  self.card_total_r, self.card_avg_r,
                   self.card_eo, self.card_zi]:
             cards_row.addWidget(c)
         cards_row.addStretch()
@@ -142,6 +145,7 @@ class KarakterTab(QWidget):
         self._update_cards()
 
     def _update_cards(self) -> None:
+        from terminal.karakter.score import trade_r
         run_id = self.run_selector.currentData()
         if run_id is None:
             # Toplam: tüm karakter_samples
@@ -152,11 +156,23 @@ class KarakterTab(QWidget):
             for o, n in cur.fetchall():
                 stats[o] = int(n)
             total = sum(stats.values())
+            rcur = self.provider.store._conn.execute(
+                "SELECT entry, stop, tp1, outcome FROM karakter_samples"
+            )
         else:
             stats = self.provider._run_outcome_stats(run_id)
             total = sum(stats.values())
+            rcur = self.provider.store._conn.execute(
+                "SELECT entry, stop, tp1, outcome FROM karakter_samples WHERE run_id = ?",
+                (run_id,),
+            )
         decided = stats["TP"] + stats["STOP"]
         wr = (stats["TP"] / decided * 100) if decided else 0.0
+        # R hesabı
+        rs = [trade_r(r[0], r[1], r[2], r[3]) for r in rcur.fetchall()]
+        decided_rs = [r for r in rs if r != 0.0]
+        total_r = sum(rs)
+        avg_r = (sum(decided_rs) / len(decided_rs)) if decided_rs else 0.0
 
         self.lbl_total.setText(str(total))
         self.lbl_tp.setText(str(stats["TP"]))
@@ -164,9 +180,16 @@ class KarakterTab(QWidget):
         self.lbl_eo.setText(str(stats["EO"]))
         self.lbl_zi.setText(str(stats["ZI"]))
         self.lbl_wr.setText(f"{wr:.1f}%" if decided else "—")
+        self.lbl_total_r.setText(f"{total_r:+.2f}R" if decided_rs else "—")
+        self.lbl_avg_r.setText(f"{avg_r:+.2f}R" if decided_rs else "—")
         # WR rengi
         wr_color = "#26a69a" if wr >= 60 else ("#ff9800" if wr >= 45 else "#ef5350") if decided else "#888"
         self.lbl_wr.setStyleSheet(f"color: {wr_color}; font-size: 16px; font-weight: bold;")
+        # R rengi
+        r_color = "#26a69a" if total_r > 0 else "#ef5350" if total_r < 0 else "#888"
+        self.lbl_total_r.setStyleSheet(f"color: {r_color}; font-size: 16px; font-weight: bold;")
+        avg_color = "#26a69a" if avg_r > 0 else "#ef5350" if avg_r < 0 else "#888"
+        self.lbl_avg_r.setStyleSheet(f"color: {avg_color}; font-size: 16px; font-weight: bold;")
 
     def _refresh_scores(self) -> None:
         from terminal.ui.styles import GREEN, RED

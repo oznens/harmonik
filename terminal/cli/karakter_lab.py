@@ -80,11 +80,28 @@ def main(argv: list[str] | None = None) -> int:
         tp = outcomes.get("TP", 0)
         sl = outcomes.get("STOP", 0)
         wr = (tp / (tp + sl) * 100) if (tp + sl) > 0 else 0
+
+        # R hesabı: bu koşumun toplam R kazancı
+        from terminal.karakter.score import trade_r
+        cur = store._conn.execute(
+            "SELECT entry, stop, tp1, outcome FROM karakter_samples WHERE run_id = ?",
+            (run_id,),
+        )
+        r_values = [trade_r(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+        total_r = sum(r_values)
+        decided_r = [r for r in r_values if r != 0.0]
+        avg_r = (sum(decided_r) / len(decided_r)) if decided_r else 0.0
+        avg_r_tp_only = (
+            sum(r for r in decided_r if r > 0) / sum(1 for r in decided_r if r > 0)
+        ) if any(r > 0 for r in decided_r) else 0.0
+
         print(f"  Toplam örneklem: {total}")
         for o, n in outcomes.items():
             pct = n / total * 100 if total else 0
             print(f"    {o:<5}: {n:>4}  ({pct:>5.1f}%)")
         print(f"  Win Rate: {wr:.1f}%  ({tp} TP / {tp+sl} kararlı)")
+        print(f"  Toplam R: {total_r:+.2f}R   (kararlı işlem başı ort: {avg_r:+.2f}R)")
+        print(f"  TP'lerin ort R: +{avg_r_tp_only:.2f}R   (1R = SL mesafesi kadar kazanç)")
         print()
         print("=" * 80)
         print("EN YÜKSEK KARAKTER SKORLARI (örneklem ≥ 2)")
