@@ -13,6 +13,7 @@ from typing import Any
 from terminal.detection.matcher import match_xabcd
 from terminal.detection.models import Setup
 from terminal.detection.patterns.abcd import build_abcd_setup, match_abcd
+from terminal.detection.patterns.shark import build_shark_setup, match_shark
 from terminal.detection.pivots import find_pivots
 from terminal.detection.prz import compute_prz, compute_trade_levels
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
@@ -112,6 +113,23 @@ def scan_klines(
         key = ("ABCD", setup.pivots["A"].time, setup.pivots["B"].time,
                setup.pivots["C"].time, setup.pivots["D"].time)
         if any(k[2:] == key[1:] for k in seen_keys):
+            continue
+        _finalize(setup, htf_trend)
+        setups.append(setup)
+
+    # 3) 5-pivot pencerelerde Shark (0-X-A-B-C, farklı kural)
+    for i in range(len(pivots) - 4):
+        m_sh = match_shark(pivots[i:i + 5])
+        if m_sh is None:
+            continue
+        setup = build_shark_setup(m_sh, symbol, interval)
+        setup.detected_at = detected_at
+        setup.htf_interval = htf_interval
+        setup.htf_trend = htf_trend
+        # Aynı 5 pivot XABCD olarak da eşleşmişse atla (daha katı XABCD önceliklidir)
+        key = (m_sh.p0.time, m_sh.x.time, m_sh.a.time, m_sh.b.time, m_sh.c.time)
+        already = any(k[1:6] == key for k in seen_keys)
+        if already:
             continue
         _finalize(setup, htf_trend)
         setups.append(setup)
