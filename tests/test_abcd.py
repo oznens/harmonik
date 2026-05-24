@@ -90,8 +90,8 @@ def test_build_setup_bull():
     assert s.pattern_family == "abcd"
     assert s.direction == "bull"
     assert s.ab_cd_equivalent is True
-    # Entry ~ D level
-    assert abs(s.entry - 92) < 1.0
+    # Entry PRZ aralığında olmalı (PRZ %40 derinlik formülü)
+    assert s.prz_low <= s.entry <= s.prz_high
     # TP1 should be above entry (bull)
     assert s.tp1 > s.entry
     # SL should be below entry

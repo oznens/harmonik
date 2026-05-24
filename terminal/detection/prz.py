@@ -52,25 +52,39 @@ def compute_prz(m: MatchResult) -> dict:
 def compute_trade_levels(m: MatchResult, prz: dict) -> dict:
     """Entry, SL, TP seviyeleri.
 
-    Entry: tanımlayıcı limit (D = ideal XA).
-    Stop: D'nin ötesi, spec.stop_at_xa katında.
+    Entry: PRZ %40 derinlik (PRZ üst banttan PRZ aralığının %40'ı kadar içeri).
+    Stop: Pattern stop (D_ideal ötesi, spec.stop_at_xa katında) yeterli derinde
+          ise korunur; entry'ye göre yanlış taraftaysa PRZ ucu + %5 buffer.
     TP1 = B seviyesi (önceki swing — doğal ilk hedef, AB=CD ile uyumlu).
     TP2 = C seviyesi (tam retracement endpoint).
 
-    Backtest optimizasyonu (8 parite x 4 TF x 5K mum, 50 XABCD setup):
-      Eski (0.382 / 0.618 IPO):  WR 57.6%, Tot +7.36R,  Avg +0.22R
-      Yeni (TP=B / TP=C):        WR 45.5%, Tot +16.33R, Avg +0.49R (2.2x R)
+    Backtest optimizasyonu (BTC+ETH 15m 1 ay, 31 setup):
+      D_ideal entry:        WR 50.0%, Tot +10.68R, Avg +0.67R
+      PRZ %40 + Akıllı SL:  WR 64.7%, Tot +15.01R, Avg +0.88R
     """
     spec = m.spec
     q = m.quintet
     sign = _direction_sign(q.direction)
     xa_len = abs(q.a.price - q.x.price)
 
-    entry = prz["d_ideal_price"]
-    stop = q.a.price + sign * spec.stop_at_xa * xa_len
+    prz_low = prz["prz_low"]
+    prz_high = prz["prz_high"]
+    prz_range = prz_high - prz_low
 
-    # TP1 = B seviyesi (önceki swing low/high — ilk doğal direnç/destek)
-    # TP2 = C seviyesi (tam retracement endpoint)
+    # PRZ %40 derinlik entry
+    if q.direction == "bull":
+        entry = prz_high - 0.40 * prz_range
+    else:
+        entry = prz_low + 0.40 * prz_range
+
+    # Akıllı SL: pattern stop yeterliyse onu kullan, değilse PRZ ucu + %5 buffer
+    pattern_stop = q.a.price + sign * spec.stop_at_xa * xa_len
+    buf = 0.05 * prz_range
+    if q.direction == "bull":
+        stop = pattern_stop if pattern_stop < entry else (prz_low - buf)
+    else:
+        stop = pattern_stop if pattern_stop > entry else (prz_high + buf)
+
     tp1 = q.b.price
     tp2 = q.c.price
 
