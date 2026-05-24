@@ -19,7 +19,7 @@ from typing import Any, Callable
 from terminal.data.mexc_client import MexcClient, MexcError
 from terminal.db.store import Store
 from terminal.detection.models import Setup
-from terminal.detection.scanner import default_threshold, scan_klines
+from terminal.detection.scanner import _is_elenen, default_threshold, scan_klines
 from terminal.karakter.simulator import SimOutcome, simulate_outcome
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
 
@@ -121,7 +121,7 @@ def run_lab(
                         trend_at_d = detect_trend(htf_prefix)
                         s.htf_trend = trend_at_d
                         s.htf_aligned = alignment(s.direction, trend_at_d)
-                        s.elenen = s.htf_aligned is False
+                        s.elenen = _is_elenen(s)
                     else:
                         s.htf_trend = None
                         s.htf_aligned = None

@@ -116,7 +116,10 @@ def test_scan_with_htf_marks_aligned():
     assert s.q_category in ("Normal", "Kaliteli")
 
 
-def test_scan_with_opposing_htf_marks_elenen():
+def test_scan_with_opposing_htf_records_misalignment():
+    """HTF zıt → htf_aligned=False, ama Gartley elenen DEĞİL (harmonik mean
+    reversion HTF zıt'ta daha iyi). Sadece HTF_OPPOSITE_PENALIZED listesindeki
+    pattern'ler (örn. 1.62 AB=CD) HTF zıt'ta elenen sayılır."""
     prices, kinds = gartley_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
     htf = [{"close": 200 - i * 0.5} for i in range(120)]  # bear
@@ -125,7 +128,28 @@ def test_scan_with_opposing_htf_marks_elenen():
     assert s.direction == "bull"
     assert s.htf_trend == "bear"
     assert s.htf_aligned is False
-    assert s.elenen is True
+    assert s.elenen is False  # Gartley HTF_OPPOSITE_PENALIZED'de değil
+
+
+def test_penalized_pattern_marked_elenen_on_htf_opposite():
+    """HTF_OPPOSITE_PENALIZED listesindeki pattern HTF zıt'ta elenen olur."""
+    from terminal.detection.models import Setup
+    from terminal.detection.pivots import Pivot
+    from terminal.detection.scanner import _is_elenen
+    p = Pivot(index=0, time=0, price=100.0, kind="high")
+    s = Setup(
+        symbol="X", interval="15m", pattern_name="1.62 AB=CD", direction="bull",
+        pivots={"X": p, "A": p, "B": p, "C": p, "D": p},
+        b_ratio=0, c_ratio=0, d_ratio=0, bc_proj=0, cd_ab_ratio=0,
+        ab_cd_equivalent=False, prz_low=0, prz_high=0, prz_components=[],
+        entry=0, stop=0, tp1=0, tp2=0, detected_at=0, pattern_family="abcd",
+    )
+    s.htf_aligned = False
+    assert _is_elenen(s) is True
+    s.htf_aligned = True
+    assert _is_elenen(s) is False
+    s.htf_aligned = None
+    assert _is_elenen(s) is False
 
 
 def test_scan_without_htf_leaves_alignment_none():

@@ -177,6 +177,23 @@ def scan_klines(
     return setups
 
 
+# Pattern-spesifik HTF zıt elenen listesi.
+# Backtest (3 ay × 5 parite × 3 TF) verisinde HTF zıt durumda net negatif R
+# üreten pattern'ler. Diğer harmonik desenler mean-reversion doğası gereği
+# HTF zıt'ta daha iyi performe ediyor (toplam +18.52R zıt vs +11.28R uyumlu)
+# — bu yüzden default olarak elenen sayılmıyor.
+HTF_OPPOSITE_PENALIZED: frozenset[str] = frozenset({
+    "1.62 AB=CD",  # HTF zıt: N=28, WR=33.3%, TotR=-7.43, AvgR=-0.31
+})
+
+
+def _is_elenen(setup: Setup) -> bool:
+    """Setup elenen havuzuna mı düşmeli? Pattern-spesifik kötü kombinasyonlar."""
+    if setup.htf_aligned is False and setup.pattern_name in HTF_OPPOSITE_PENALIZED:
+        return True
+    return False
+
+
 def _finalize(setup: Setup, htf_trend: str | None) -> None:
     """Setup'a Q skoru ve HTF uyumu doldur (in-place)."""
     qr = compute_q(setup, htf_trend=htf_trend)
@@ -184,4 +201,4 @@ def _finalize(setup: Setup, htf_trend: str | None) -> None:
     setup.q_category = qr.category
     setup.q_components = qr.components
     setup.htf_aligned = alignment(setup.direction, htf_trend)
-    setup.elenen = setup.htf_aligned is False
+    setup.elenen = _is_elenen(setup)
