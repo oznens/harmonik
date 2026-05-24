@@ -142,6 +142,8 @@ CREATE TABLE IF NOT EXISTS karakter_samples (
     entered_at     INTEGER,        -- Aktif olduğu mum (open_time)
     exited_at      INTEGER,        -- terminal duruma geçtiği mum
     ambiguous      INTEGER NOT NULL DEFAULT 0,
+    htf_trend      TEXT,           -- D anındaki HTF trend: 'bull'/'bear'/'neutral'/NULL
+    htf_aligned    INTEGER,        -- 1=uyumlu, 0=zıt, NULL=bilinmiyor/nötr
     FOREIGN KEY (run_id) REFERENCES karakter_runs(id) ON DELETE CASCADE
 );
 

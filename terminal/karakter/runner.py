@@ -2,13 +2,16 @@
 
 Her (symbol, interval) kombinasyonu için:
   1. MEXC'den N (örn. 20.000) mum çek (sayfalanmış)
-  2. scan_klines ile tüm tarihsel formasyonları bul
-  3. Her setup için D pivotundan sonraki mumları simulate_outcome'a ver
-  4. Outcome'ları karakter_samples'a yaz
-  5. Tüm koşu bittiğinde karakter_scores agregasyonunu güncelle
+  2. (varsa) HTF mumlarını çek; setup başına D zamanı kadar prefiks ile
+     HTF trendini tarihsel olarak yeniden hesapla
+  3. scan_klines ile tüm tarihsel formasyonları bul
+  4. Her setup için D pivotundan sonraki mumları simulate_outcome'a ver
+  5. Outcome'ları (HTF bilgisi dahil) karakter_samples'a yaz
+  6. Tüm koşu bittiğinde karakter_scores agregasyonunu güncelle
 """
 from __future__ import annotations
 
+import bisect
 import logging
 import time
 from typing import Any, Callable
@@ -18,6 +21,7 @@ from terminal.db.store import Store
 from terminal.detection.models import Setup
 from terminal.detection.scanner import default_threshold, scan_klines
 from terminal.karakter.simulator import SimOutcome, simulate_outcome
+from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
 
 log = logging.getLogger(__name__)
 
@@ -74,11 +78,27 @@ def run_lab(
                     progress(f"{tag} — ATLANDI (yetersiz mum)")
                 continue
 
+            # HTF mumları (varsa) — backtest süresince setup başı tarihsel trend
+            htf_int = htf_for(interval)
+            htf_klines: list[dict[str, Any]] | None = None
+            htf_close_times: list[int] = []
+            if htf_int is not None:
+                # LTF zaman aralığı kadar HTF mumu çek (LTF bars ÷ ölçek + tampon)
+                htf_bars = max(300, bars_per_pair // 4 + 200)
+                try:
+                    htf_klines = client.klines_paginated(symbol, htf_int, htf_bars, throttle=0.05)
+                    htf_close_times = [k["close_time"] for k in htf_klines]
+                except MexcError as e:
+                    log.warning("%s HTF (%s) veri hatası: %s", tag, htf_int, e)
+                    htf_klines = None
+
             threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
-            setups = scan_klines(klines, symbol, interval, zigzag_threshold=threshold)
+            setups = scan_klines(klines, symbol, interval, zigzag_threshold=threshold,
+                                 htf_klines=htf_klines)
 
             if progress:
-                progress(f"{tag} — {len(klines)} mum, {len(setups)} formasyon, simüle ediliyor...")
+                htf_note = f", HTF={htf_int}" if htf_klines else ", HTF=yok"
+                progress(f"{tag} — {len(klines)} mum{htf_note}, {len(setups)} formasyon, simüle ediliyor...")
 
             for s in setups:
                 d_idx = _find_d_index(klines, s.pivots["D"].time)
@@ -91,6 +111,22 @@ def run_lab(
                 # — scan_klines bunu int(time.time())'a set ediyor, lab için
                 # tarihsel zaman daha anlamlı
                 s.detected_at = s.pivots["D"].time
+
+                # HTF trendini D pivot anı için yeniden hesapla (look-ahead engelle)
+                if htf_klines is not None and htf_close_times:
+                    d_time = s.pivots["D"].time
+                    cutoff = bisect.bisect_right(htf_close_times, d_time)
+                    htf_prefix = htf_klines[:cutoff]
+                    if len(htf_prefix) >= 60:
+                        trend_at_d = detect_trend(htf_prefix)
+                        s.htf_trend = trend_at_d
+                        s.htf_aligned = alignment(s.direction, trend_at_d)
+                        s.elenen = s.htf_aligned is False
+                    else:
+                        s.htf_trend = None
+                        s.htf_aligned = None
+                        s.elenen = False
+
                 outcome = simulate_outcome(s, future)
                 store.add_karakter_sample(run_id, s, outcome)
                 total_samples += 1

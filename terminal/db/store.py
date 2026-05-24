@@ -57,6 +57,12 @@ class Store:
             self._conn.execute(
                 "ALTER TABLE setup_lifecycle ADD COLUMN source TEXT NOT NULL DEFAULT 'live'"
             )
+        # karakter_samples migrasyonu (htf_trend / htf_aligned kolonları)
+        cur = self._conn.execute("PRAGMA table_info(karakter_samples)")
+        ks_cols = {row[1] for row in cur.fetchall()}
+        for col, definition in (("htf_trend", "TEXT"), ("htf_aligned", "INTEGER")):
+            if col not in ks_cols:
+                self._conn.execute(f"ALTER TABLE karakter_samples ADD COLUMN {col} {definition}")
 
     def upsert_kline(self, symbol: str, interval: str, k: dict[str, Any]) -> None:
         self._conn.execute(
@@ -334,12 +340,18 @@ class Store:
         )
 
         # 3) Karakter sample tablosuna da yaz (lab-spesifik istatistik)
+        htf_aligned_int: int | None
+        if setup.htf_aligned is None:
+            htf_aligned_int = None
+        else:
+            htf_aligned_int = 1 if setup.htf_aligned else 0
         self._conn.execute(
             """INSERT INTO karakter_samples
                (run_id, symbol, interval, pattern_name, direction,
                 d_time, d_price, entry, stop, tp1, q_score,
-                outcome, entered_at, exited_at, ambiguous)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                outcome, entered_at, exited_at, ambiguous,
+                htf_trend, htf_aligned)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id, setup.symbol, setup.interval, setup.pattern_name, setup.direction,
                 setup.pivots["D"].time, setup.pivots["D"].price,
@@ -347,6 +359,7 @@ class Store:
                 setup.q_score or None,
                 outcome.outcome, outcome.entered_time, outcome.exited_time,
                 1 if outcome.ambiguous else 0,
+                setup.htf_trend, htf_aligned_int,
             ),
         )
 
