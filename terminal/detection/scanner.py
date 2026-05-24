@@ -102,6 +102,7 @@ def scan_klines(
             pattern_family="xabcd",
         )
         _finalize(setup, htf_trend)
+        _normalize_sl(setup)
         setups.append(setup)
         seen_keys.add((m.spec.name, q.x.time, q.a.time, q.b.time, q.c.time, q.d.time))
 
@@ -120,6 +121,7 @@ def scan_klines(
         if any(k[2:] == key[1:] for k in seen_keys):
             continue
         _finalize(setup, htf_trend)
+        _normalize_sl(setup)
         setups.append(setup)
 
     # 3) 5-pivot pencerelerde Shark (0-X-A-B-C, farklı kural)
@@ -137,6 +139,7 @@ def scan_klines(
         if already:
             continue
         _finalize(setup, htf_trend)
+        _normalize_sl(setup)
         setups.append(setup)
 
     # 4) 5-pivot pencerelerde 5-0 (X-A-B-C-D, B XA extension)
@@ -153,6 +156,7 @@ def scan_klines(
         if already:
             continue
         _finalize(setup, htf_trend)
+        _normalize_sl(setup)
         setups.append(setup)
 
     # 5) 5-pivot pencerelerde Three Drives (3 itiş + 2 düzeltme)
@@ -172,6 +176,7 @@ def scan_klines(
         if already:
             continue
         _finalize(setup, htf_trend)
+        _normalize_sl(setup)
         setups.append(setup)
 
     return setups
@@ -186,12 +191,37 @@ HTF_OPPOSITE_PENALIZED: frozenset[str] = frozenset({
     "1.62 AB=CD",  # HTF zıt: N=28, WR=33.3%, TotR=-7.43, AvgR=-0.31
 })
 
+# Minimum SL mesafesi (entry'nin yüzdesi olarak). Dar PRZ aralığında entry
+# pattern_stop'a çok yakın geliyor — 1-tick slippage SL'yi geçirir, R hesabı
+# anlamsız. 14 parite × 15m × 1 ay backtest: 14 standalone AB=CD setup
+# %0.3'ün altındaydı (R:R 10-53, %5'i toplam sample'ın). Bu filtre live'da
+# riski yönetilebilir setuplarla sınırlar.
+MIN_SL_PCT = 0.004  # %0.4
+
 
 def _is_elenen(setup: Setup) -> bool:
     """Setup elenen havuzuna mı düşmeli? Pattern-spesifik kötü kombinasyonlar."""
     if setup.htf_aligned is False and setup.pattern_name in HTF_OPPOSITE_PENALIZED:
         return True
     return False
+
+
+def _normalize_sl(setup: Setup) -> None:
+    """SL mesafesi MIN_SL_PCT'in altındaysa, SL'i entry'den MIN_SL_PCT uzağa it.
+
+    Dar PRZ aralığında entry ≈ pattern_stop oluşuyor — 1-tick slippage SL'yi
+    geçirir, R hesabı anlamsız. Setup'ı düşürmek yerine SL'i normalize ediyoruz:
+    sample korunur, R:R gerçekçi olur (53.65 → 5 gibi), live'da uygulanabilir.
+    """
+    if setup.entry <= 0:
+        return
+    dist_pct = abs(setup.entry - setup.stop) / setup.entry
+    if dist_pct >= MIN_SL_PCT:
+        return
+    if setup.direction == "bull":
+        setup.stop = setup.entry * (1 - MIN_SL_PCT)
+    else:
+        setup.stop = setup.entry * (1 + MIN_SL_PCT)
 
 
 def _finalize(setup: Setup, htf_trend: str | None) -> None:
