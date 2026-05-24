@@ -13,7 +13,12 @@ from typing import Any
 from terminal.detection.matcher import match_xabcd
 from terminal.detection.models import Setup
 from terminal.detection.patterns.abcd import build_abcd_setup, match_abcd
+from terminal.detection.patterns.five_zero import build_five_zero_setup, match_five_zero
 from terminal.detection.patterns.shark import build_shark_setup, match_shark
+from terminal.detection.patterns.three_drives import (
+    build_three_drives_setup,
+    match_three_drives,
+)
 from terminal.detection.pivots import find_pivots
 from terminal.detection.prz import compute_prz, compute_trade_levels
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
@@ -128,6 +133,41 @@ def scan_klines(
         setup.htf_trend = htf_trend
         # Aynı 5 pivot XABCD olarak da eşleşmişse atla (daha katı XABCD önceliklidir)
         key = (m_sh.p0.time, m_sh.x.time, m_sh.a.time, m_sh.b.time, m_sh.c.time)
+        already = any(k[1:6] == key for k in seen_keys)
+        if already:
+            continue
+        _finalize(setup, htf_trend)
+        setups.append(setup)
+
+    # 4) 5-pivot pencerelerde 5-0 (X-A-B-C-D, B XA extension)
+    for i in range(len(pivots) - 4):
+        m_fz = match_five_zero(pivots[i:i + 5])
+        if m_fz is None:
+            continue
+        setup = build_five_zero_setup(m_fz, symbol, interval)
+        setup.detected_at = detected_at
+        setup.htf_interval = htf_interval
+        setup.htf_trend = htf_trend
+        key = (m_fz.x.time, m_fz.a.time, m_fz.b.time, m_fz.c.time, m_fz.d.time)
+        already = any(k[1:6] == key for k in seen_keys)
+        if already:
+            continue
+        _finalize(setup, htf_trend)
+        setups.append(setup)
+
+    # 5) 5-pivot pencerelerde Three Drives (3 itiş + 2 düzeltme)
+    interval_ms_map = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+                       "60m": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "1W": 604_800_000}
+    interval_ms = interval_ms_map.get(interval, 3_600_000)
+    for i in range(len(pivots) - 4):
+        m_td = match_three_drives(pivots[i:i + 5], interval_ms=interval_ms)
+        if m_td is None:
+            continue
+        setup = build_three_drives_setup(m_td, symbol, interval)
+        setup.detected_at = detected_at
+        setup.htf_interval = htf_interval
+        setup.htf_trend = htf_trend
+        key = (m_td.d1.time, m_td.r1.time, m_td.d2.time, m_td.r2.time, m_td.d3.time)
         already = any(k[1:6] == key for k in seen_keys)
         if already:
             continue
