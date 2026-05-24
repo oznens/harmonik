@@ -52,8 +52,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Telegram bildirimleri kapat (sadece DB)")
     parser.add_argument("--no-chart", action="store_true",
                         help="Chart oluşturma; sadece metin gönder")
-    parser.add_argument("--min-q", type=int, default=0,
-                        help="Bu Q skorunun altındakileri Telegram'a yollama (varsayılan 0)")
+    parser.add_argument("--min-q", type=int, default=50,
+                        help="Bu Q skorunun altındakileri Telegram'a yollama "
+                             "(varsayılan 50 — 3-ay backtest Q≥50 küçük net pozitif kazanç gösteriyor)")
     parser.add_argument("--include-elenen", action="store_true",
                         help="Elenen setup'ları da Telegram'a yolla (varsayılan: hayır)")
     parser.add_argument("--no-htf", action="store_true",

@@ -1,14 +1,19 @@
-"""Q (Quality) skoru hesaplayıcı — 0-100 arası bütünleşik kalite ölçütü.
+"""Q (Quality) skoru hesaplayıcı — 0-100 arası pattern-içsel kalite ölçütü.
 
 Bileşenler (toplam 100):
-  - PRZ density (25): PRZ bileşenlerinin ne kadar dar bir bantta toplandığı.
+  - PRZ density (30): PRZ bileşenlerinin ne kadar dar bir bantta toplandığı.
   - B precision (15): B noktasının formasyon bandının merkezine yakınlığı.
-  - D precision (25): D noktasının tanımlayıcı ideal'e yakınlığı (en kritik).
+  - D precision (30): D noktasının tanımlayıcı ideal'e yakınlığı (en kritik).
   - AB=CD bonus (15): AB=CD onayı varsa tam puan.
-  - BC projection (5): BC band içindeyse tam puan.
-  - HTF alignment (15): üst zaman dilimi trendi setup yönüyle uyumluysa tam.
+  - BC projection (10): BC band içindeyse tam puan.
 
-HTF verisi yoksa max 85 puana ulaşılır. Kategori:
+HTF alignment artık Q'dan çıkarıldı — backtest verisi (3 ay × 5 parite × 3 TF)
+harmonik mean-reversion setuplarının HTF zıt'ta daha iyi performe ettiğini
+gösteriyor (uyumlu +11R vs zıt +18R). HTF bilgisi setup.htf_aligned alanında
+bağımsız flag olarak kalır; live tracker pattern-spesifik elenen mantığını
+HTF_OPPOSITE_PENALIZED listesiyle uygular.
+
+Kategori:
   Riskli   < 50
   Normal   50-69
   Kaliteli ≥ 70
@@ -21,13 +26,12 @@ from terminal.detection.models import Setup
 from terminal.detection.spec import PATTERNS
 
 
-# Bileşen ağırlıkları (toplam 100)
-W_PRZ = 25.0
+# Bileşen ağırlıkları (toplam 100) — HTF bileşeni çıkarıldı, 15 puanı dağıtıldı.
+W_PRZ = 30.0  # +5 (PRZ density'nin önemini artır)
 W_B = 15.0
-W_D = 25.0
+W_D = 30.0   # +5 (D noktası harmonik patternin tanımlayıcı limit'i, en kritik)
 W_ABCD = 15.0
-W_BC = 5.0
-W_HTF = 15.0
+W_BC = 10.0  # +5
 
 
 @dataclass
@@ -110,17 +114,6 @@ def _bc_proj(setup: Setup) -> float:
     return 0.0
 
 
-def _htf_alignment(direction: str, htf_trend: str | None) -> float:
-    if htf_trend is None:
-        return 0.0
-    if htf_trend == "neutral":
-        return W_HTF * 0.5
-    if (direction == "bull" and htf_trend == "bull") or \
-       (direction == "bear" and htf_trend == "bear"):
-        return W_HTF
-    return 0.0  # ters yön
-
-
 def categorize(score: int) -> str:
     if score >= 70:
         return "Kaliteli"
@@ -130,14 +123,17 @@ def categorize(score: int) -> str:
 
 
 def compute_q(setup: Setup, htf_trend: str | None = None) -> QualityResult:
-    """Setup için Q skorunu, kategoriyi ve bileşen dökümünü hesapla."""
+    """Setup için Q skorunu, kategoriyi ve bileşen dökümünü hesapla.
+
+    htf_trend parametresi geriye uyumluluk için duruyor ama Q hesabında
+    kullanılmıyor — HTF kontrolü scanner._is_elenen ile ayrı yapılır.
+    """
     components = {
         "prz_density": round(_prz_density(setup), 2),
         "b_precision": round(_b_precision(setup), 2),
         "d_precision": round(_d_precision(setup), 2),
         "ab_cd":       round(_ab_cd(setup), 2),
         "bc_proj":     round(_bc_proj(setup), 2),
-        "htf":         round(_htf_alignment(setup.direction, htf_trend), 2),
     }
     total = round(sum(components.values()))
     score = min(100, max(0, total))

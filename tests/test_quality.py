@@ -69,27 +69,19 @@ def _ideal_gartley_setup(htf_trend=None):
 def test_compute_q_ideal_gartley_no_htf():
     s = _ideal_gartley_setup(htf_trend=None)
     qr = compute_q(s, htf_trend=None)
-    # HTF yok → HTF bileşeni 0. Ideal Gartley AB=CD onaylı: 55-80 bandında.
-    assert 55 <= qr.score <= 85
-    assert qr.components["htf"] == 0
-    # AB=CD onayı çıkmalı
+    # Ideal Gartley AB=CD onaylı, HTF artık skora dahil değil.
+    assert 60 <= qr.score <= 100
+    assert "htf" not in qr.components  # HTF bileşeni kaldırıldı
     assert qr.components["ab_cd"] == 15
 
 
-def test_compute_q_ideal_gartley_bull_with_bull_htf():
-    s = _ideal_gartley_setup(htf_trend="bull")
-    qr = compute_q(s, htf_trend="bull")
-    # +15 HTF puanı: ideal Gartley + bull HTF → 70+ (Kaliteli)
-    assert qr.score >= 70
-    assert qr.components["htf"] == 15
-    assert qr.category == "Kaliteli"
-
-
-def test_compute_q_ideal_gartley_bull_with_bear_htf():
-    s = _ideal_gartley_setup(htf_trend=None)  # bull
-    qr = compute_q(s, htf_trend="bear")
-    # HTF zıt → HTF puanı 0
-    assert qr.components["htf"] == 0
+def test_compute_q_htf_does_not_affect_score():
+    """HTF trend artık Q skorunu etkilemiyor (bilgi olarak setup.htf_aligned'de)."""
+    s = _ideal_gartley_setup(htf_trend=None)
+    q_no_htf = compute_q(s, htf_trend=None).score
+    q_bull_htf = compute_q(s, htf_trend="bull").score
+    q_bear_htf = compute_q(s, htf_trend="bear").score
+    assert q_no_htf == q_bull_htf == q_bear_htf
 
 
 def test_categorize_thresholds():

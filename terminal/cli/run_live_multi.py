@@ -210,7 +210,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--zigzag", type=float, default=None)
     parser.add_argument("--no-telegram", action="store_true")
     parser.add_argument("--no-chart", action="store_true")
-    parser.add_argument("--min-q", type=int, default=0)
+    parser.add_argument("--min-q", type=int, default=50,
+                        help="Bu Q skorunun altındakileri Telegram'a yollama "
+                             "(varsayılan 50; 3-ay backtest Q≥50 küçük net pozitif kazanç)")
     parser.add_argument("--min-karakter", type=float, default=0.0,
                         help="Karakter skoru bu eşiğin altında olan (parite, TF, pattern, yön) "
                              "kombinasyonlarını Telegram'a gönderme. Backtest verisi yoksa "
