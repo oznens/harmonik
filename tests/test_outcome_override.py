@@ -21,7 +21,7 @@ def store(tmp_path: Path) -> Store:
 def _seed_setup(store: Store) -> int:
     prices, kinds = gartley_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TESTUSDT", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TESTUSDT", "60m", zigzag_threshold=0.01, min_rr=0.0)
     s = next(x for x in setups if x.pattern_name == "Gartley")
     sid = store.upsert_setup(s)
     tracker = LifecycleTracker("TESTUSDT", "60m", store)

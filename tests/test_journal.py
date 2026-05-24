@@ -65,15 +65,14 @@ _seed_counter = [0]
 def _seed_setup_with_outcome(store: Store, day_iso: str, outcome: str, pattern: str = "Gartley"):
     """Bir setup yarat ve verilen günde verilen outcome ile sonuçlandır.
 
-    Her çağrı benzersiz pivot zamanları üretir (aynı pivot kombinasyonu UPSERT'te
-    birleşmesin diye). Test izolasyonu için global sayaç kullanılıyor.
+    Her çağrı benzersiz pivot zamanları üretir. min_rr=0 ile filtre bypass
+    edilir — sentetik ideal Gartley TP=B yapısal olarak yakın (R:R<1).
     """
     _seed_counter[0] += 1
     prices, kinds = gartley_bull()
-    # base_time'ı her seed için biraz kaydır → unique pivot times
     base_time = 1_700_000_000_000 + _seed_counter[0] * 10_000_000_000
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12, base_time=base_time)
-    setups = scan_klines(klines, "TESTUSDT", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TESTUSDT", "60m", zigzag_threshold=0.01, min_rr=0.0)
     s = next(x for x in setups if x.pattern_name == pattern)
     day_start = int(parse_date(day_iso).timestamp() * 1000) + 3600 * 1000
     s.detected_at = day_start

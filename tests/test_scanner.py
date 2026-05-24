@@ -15,7 +15,7 @@ from tests.synthetic import (
 def test_scan_finds_synthetic_gartley_bull():
     prices, kinds = gartley_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, min_rr=0.0)
     assert len(setups) >= 1
     gartley = [s for s in setups if s.pattern_name == "Gartley"]
     assert len(gartley) == 1
@@ -32,7 +32,7 @@ def test_scan_finds_synthetic_gartley_bull():
 def test_scan_finds_synthetic_bat_bull():
     prices, kinds = bat_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, min_rr=0.0)
     bat = [s for s in setups if s.pattern_name == "Bat"]
     assert len(bat) == 1
     s = bat[0]
@@ -46,7 +46,7 @@ def test_scan_finds_synthetic_bat_bull():
 def test_scan_finds_synthetic_butterfly_bull():
     prices, kinds = butterfly_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, min_rr=0.0)
     butterflies = [s for s in setups if s.pattern_name == "Butterfly"]
     assert len(butterflies) == 1
 
@@ -54,7 +54,7 @@ def test_scan_finds_synthetic_butterfly_bull():
 def test_scan_finds_synthetic_crab_bull():
     prices, kinds = crab_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, min_rr=0.0)
     crabs = [s for s in setups if s.pattern_name == "Crab"]
     assert len(crabs) == 1
 
@@ -62,7 +62,7 @@ def test_scan_finds_synthetic_crab_bull():
 def test_scan_finds_bear_variant():
     prices, kinds = to_bear(*gartley_bull())
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, min_rr=0.0)
     bears = [s for s in setups if s.direction == "bear"]
     assert len(bears) >= 1
 
@@ -80,14 +80,14 @@ def test_scan_handles_insufficient_pivots():
             "open": 100, "high": 100.5, "low": 99.5, "close": 100,
             "volume": 100, "quote_volume": 1000,
         })
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.05)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.05, min_rr=0.0)
     assert setups == []
 
 
 def test_prz_contains_d_ideal_price():
     prices, kinds = gartley_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, min_rr=0.0)
     s = next(x for x in setups if x.pattern_name == "Gartley")
     # 0.786 XA = entry, PRZ aralığında olmalı
     assert s.prz_low <= s.entry <= s.prz_high

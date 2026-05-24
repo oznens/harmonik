@@ -49,6 +49,7 @@ def scan_klines(
     interval: str,
     zigzag_threshold: float | None = None,
     htf_klines: list[dict[str, Any]] | None = None,
+    min_rr: float = 1.0,
 ) -> list[Setup]:
     """Mum dizisinden formasyonları çıkar; opsiyonel HTF ile Q skoru hesapla.
 
@@ -103,6 +104,8 @@ def scan_klines(
         )
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        if not _has_valid_rr(setup, min_rr):
+            continue
         setups.append(setup)
         seen_keys.add((m.spec.name, q.x.time, q.a.time, q.b.time, q.c.time, q.d.time))
 
@@ -122,6 +125,8 @@ def scan_klines(
             continue
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        if not _has_valid_rr(setup, min_rr):
+            continue
         setups.append(setup)
 
     # 3) 5-pivot pencerelerde Shark (0-X-A-B-C, farklı kural)
@@ -140,6 +145,8 @@ def scan_klines(
             continue
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        if not _has_valid_rr(setup, min_rr):
+            continue
         setups.append(setup)
 
     # 4) 5-pivot pencerelerde 5-0 (X-A-B-C-D, B XA extension)
@@ -157,6 +164,8 @@ def scan_klines(
             continue
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        if not _has_valid_rr(setup, min_rr):
+            continue
         setups.append(setup)
 
     # 5) 5-pivot pencerelerde Three Drives (3 itiş + 2 düzeltme)
@@ -177,6 +186,8 @@ def scan_klines(
             continue
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        if not _has_valid_rr(setup, min_rr):
+            continue
         setups.append(setup)
 
     return setups
@@ -222,6 +233,21 @@ def _normalize_sl(setup: Setup) -> None:
         setup.stop = setup.entry * (1 - MIN_SL_PCT)
     else:
         setup.stop = setup.entry * (1 + MIN_SL_PCT)
+
+
+def _has_valid_rr(setup: Setup, min_rr: float = 1.0) -> bool:
+    """R:R ≥ min_rr mu? TP-mesafesi SL-mesafesinden az olan setuplar reject edilir.
+
+    Trade inceleme (1 ay × 14 parite × 15m): 13 TP "kazandı" ama R:R < 1
+    (kazanç < SL boyutu). Çoğu 1.62 AB=CD'de — uzun CD bacağı yüzünden TP=B
+    yapısal swing entry'ye çok yakın geliyor. Bu setuplarda potansiyel kazanç
+    risk'ten küçük, asimetrik dezavantaj. min_rr=0.0 → filtre bypass (testler).
+    """
+    if min_rr <= 0:
+        return True
+    sl_dist = abs(setup.entry - setup.stop)
+    tp_dist = abs(setup.tp1 - setup.entry)
+    return sl_dist > 0 and (tp_dist / sl_dist) >= min_rr
 
 
 def _finalize(setup: Setup, htf_trend: str | None) -> None:

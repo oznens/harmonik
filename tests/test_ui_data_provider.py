@@ -25,7 +25,7 @@ def store(tmp_path: Path) -> Store:
 def _seed_setup(store: Store, sentetic_fn, interval: str = "60m"):
     prices, kinds = sentetic_fn()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TESTUSDT", interval, zigzag_threshold=0.01)
+    setups = scan_klines(klines, "TESTUSDT", interval, zigzag_threshold=0.01, min_rr=0.0)
     if not setups:
         return None
     s = setups[0]

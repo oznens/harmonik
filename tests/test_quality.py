@@ -62,7 +62,7 @@ def _ideal_gartley_setup(htf_trend=None):
             htf = [{"close": 200 - i * 0.5} for i in range(120)]
         elif htf_trend == "neutral":
             htf = [{"close": 100} for _ in range(120)]
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=htf)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=htf, min_rr=0.0)
     return next(s for s in setups if s.pattern_name == "Gartley")
 
 
@@ -98,7 +98,7 @@ def test_scan_with_htf_marks_aligned():
     prices, kinds = gartley_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
     htf = [{"close": 100 + i * 0.5} for i in range(120)]  # bull
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=htf)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=htf, min_rr=0.0)
     s = next(x for x in setups if x.pattern_name == "Gartley")
     assert s.direction == "bull"
     assert s.htf_trend == "bull"
@@ -115,7 +115,7 @@ def test_scan_with_opposing_htf_records_misalignment():
     prices, kinds = gartley_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
     htf = [{"close": 200 - i * 0.5} for i in range(120)]  # bear
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=htf)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=htf, min_rr=0.0)
     s = next(x for x in setups if x.pattern_name == "Gartley")
     assert s.direction == "bull"
     assert s.htf_trend == "bear"
@@ -147,7 +147,7 @@ def test_penalized_pattern_marked_elenen_on_htf_opposite():
 def test_scan_without_htf_leaves_alignment_none():
     prices, kinds = gartley_bull()
     klines = make_xabcd_klines(prices, kinds, bars_per_leg=12)
-    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=None)
+    setups = scan_klines(klines, "TEST", "60m", zigzag_threshold=0.01, htf_klines=None, min_rr=0.0)
     s = next(x for x in setups if x.pattern_name == "Gartley")
     assert s.htf_trend is None
     assert s.htf_aligned is None
