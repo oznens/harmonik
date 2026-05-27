@@ -19,7 +19,7 @@ cur = s._conn.execute("""
     SELECT s.id, s.symbol, s.interval, s.pattern_name, s.direction,
            s.entry, s.stop, s.tp1, s.detected_at,
            l.state, l.entered_at, l.exited_at,
-           (SELECT exit_price FROM setup_events WHERE setup_id = s.id
+           (SELECT trigger_price FROM setup_events WHERE setup_id = s.id
             AND new_state IN ('TP','STOP','EO','ZI')
             ORDER BY event_time DESC LIMIT 1) AS exit_price
     FROM setups s
