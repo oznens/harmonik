@@ -68,6 +68,21 @@ class Store:
                                  ("entered_price", "REAL")):
             if col not in ks_cols:
                 self._conn.execute(f"ALTER TABLE karakter_samples ADD COLUMN {col} {definition}")
+        # Duplicate setup temizliği: aynı (symbol, interval, pattern_name,
+        # direction, d_time) için birden fazla kayıt varsa en küçük id'lileri
+        # sil (en yeni Q skoru / pivot bilgisini koru). Tracker bir kez bu
+        # mantığı manuel uygular, idempotent.
+        self._conn.execute("""
+            DELETE FROM setups WHERE id IN (
+                SELECT s1.id FROM setups s1
+                JOIN setups s2 ON s1.symbol = s2.symbol
+                              AND s1.interval = s2.interval
+                              AND s1.pattern_name = s2.pattern_name
+                              AND s1.direction = s2.direction
+                              AND s1.d_time = s2.d_time
+                              AND s1.id < s2.id
+            )
+        """)
         # Potansiyel pattern tablosu — UI'da görüntülemek için kalıcı saklama
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS potential_patterns (
@@ -152,11 +167,65 @@ class Store:
     # ---- setups -------------------------------------------------------
 
     def upsert_setup(self, s: "Setup") -> int:
-        """Setup'u kaydet (aynı pivot kombinasyonu varsa günceller). id döner."""
+        """Setup'u kaydet — aynı (sembol, interval, pattern, yön, D zamanı)
+        için tek satır. X-A-B-C farklı pivot olsa bile aynı D = aynı setup
+        sayılır (ZigZag eşik değişikliği duplicate oluşturmasın).
+        """
         pivots = s.pivots
-        self._conn.execute(
-            """
-            INSERT INTO setups (
+        d_time = pivots["D"].time
+
+        # Önce mevcut kaydı ara — aynı pattern + D zamanı
+        cur = self._conn.execute(
+            """SELECT id FROM setups
+               WHERE symbol=? AND interval=? AND pattern_name=?
+                 AND direction=? AND d_time=?""",
+            (s.symbol, s.interval, s.pattern_name, s.direction, d_time),
+        )
+        existing = cur.fetchone()
+
+        params_common = (
+            pivots["X"].time, pivots["X"].price,
+            pivots["A"].time, pivots["A"].price,
+            pivots["B"].time, pivots["B"].price,
+            pivots["C"].time, pivots["C"].price,
+            d_time, pivots["D"].price,
+            s.b_ratio, s.c_ratio, s.d_ratio, s.bc_proj, s.cd_ab_ratio,
+            1 if s.ab_cd_equivalent else 0,
+            s.prz_low, s.prz_high, json.dumps(s.prz_components),
+            s.entry, s.stop, s.tp1, s.tp2, s.detected_at,
+            s.q_score if s.q_score else None,
+            s.q_category or None,
+            json.dumps(s.q_components) if s.q_components else None,
+            s.htf_interval, s.htf_trend,
+            (1 if s.htf_aligned else 0) if s.htf_aligned is not None else None,
+            1 if s.elenen else 0,
+            s.confluence_score if s.confluence_score else None,
+            json.dumps(s.confluence_components) if s.confluence_components else None,
+            s.rsi_at_d, s.volume_ratio,
+        )
+
+        if existing is not None:
+            sid = int(existing[0])
+            self._conn.execute(
+                """UPDATE setups SET
+                    x_time=?, x_price=?, a_time=?, a_price=?, b_time=?, b_price=?,
+                    c_time=?, c_price=?, d_time=?, d_price=?,
+                    b_ratio=?, c_ratio=?, d_ratio=?, bc_proj=?, cd_ab_ratio=?,
+                    ab_cd_equivalent=?,
+                    prz_low=?, prz_high=?, prz_components=?,
+                    entry=?, stop=?, tp1=?, tp2=?, detected_at=?,
+                    q_score=?, q_category=?, q_components=?,
+                    htf_interval=?, htf_trend=?, htf_aligned=?, elenen=?,
+                    confluence_score=?, confluence_components=?,
+                    rsi_at_d=?, volume_ratio=?
+                   WHERE id=?""",
+                params_common + (sid,),
+            )
+            return sid
+
+        # INSERT (yeni kayıt)
+        cur = self._conn.execute(
+            """INSERT INTO setups (
                 symbol, interval, pattern_name, direction,
                 x_time, x_price, a_time, a_price, b_time, b_price,
                 c_time, c_price, d_time, d_price,
@@ -166,65 +235,17 @@ class Store:
                 q_score, q_category, q_components,
                 htf_interval, htf_trend, htf_aligned, elenen,
                 confluence_score, confluence_components, rsi_at_d, volume_ratio
-            ) VALUES (?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?,
-                      ?, ?, ?, ?, ?,
-                      ?, ?, ?,
-                      ?, ?, ?, ?,
-                      ?, ?, ?, ?)
-            ON CONFLICT(symbol, interval, pattern_name, x_time, a_time, b_time, c_time, d_time)
-            DO UPDATE SET
-                b_ratio=excluded.b_ratio, c_ratio=excluded.c_ratio,
-                d_ratio=excluded.d_ratio, bc_proj=excluded.bc_proj,
-                cd_ab_ratio=excluded.cd_ab_ratio,
-                ab_cd_equivalent=excluded.ab_cd_equivalent,
-                prz_low=excluded.prz_low, prz_high=excluded.prz_high,
-                prz_components=excluded.prz_components,
-                entry=excluded.entry, stop=excluded.stop,
-                tp1=excluded.tp1, tp2=excluded.tp2,
-                detected_at=excluded.detected_at,
-                q_score=excluded.q_score, q_category=excluded.q_category,
-                q_components=excluded.q_components,
-                htf_interval=excluded.htf_interval, htf_trend=excluded.htf_trend,
-                htf_aligned=excluded.htf_aligned, elenen=excluded.elenen,
-                confluence_score=excluded.confluence_score,
-                confluence_components=excluded.confluence_components,
-                rsi_at_d=excluded.rsi_at_d, volume_ratio=excluded.volume_ratio
-            """,
-            (
-                s.symbol, s.interval, s.pattern_name, s.direction,
-                pivots["X"].time, pivots["X"].price,
-                pivots["A"].time, pivots["A"].price,
-                pivots["B"].time, pivots["B"].price,
-                pivots["C"].time, pivots["C"].price,
-                pivots["D"].time, pivots["D"].price,
-                s.b_ratio, s.c_ratio, s.d_ratio, s.bc_proj, s.cd_ab_ratio,
-                1 if s.ab_cd_equivalent else 0,
-                s.prz_low, s.prz_high, json.dumps(s.prz_components),
-                s.entry, s.stop, s.tp1, s.tp2, s.detected_at,
-                s.q_score if s.q_score else None,
-                s.q_category or None,
-                json.dumps(s.q_components) if s.q_components else None,
-                s.htf_interval, s.htf_trend,
-                (1 if s.htf_aligned else 0) if s.htf_aligned is not None else None,
-                1 if s.elenen else 0,
-                s.confluence_score if s.confluence_score else None,
-                json.dumps(s.confluence_components) if s.confluence_components else None,
-                s.rsi_at_d, s.volume_ratio,
-            ),
+               ) VALUES (?, ?, ?, ?,
+                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                         ?, ?, ?, ?, ?, ?,
+                         ?, ?, ?,
+                         ?, ?, ?, ?, ?,
+                         ?, ?, ?,
+                         ?, ?, ?, ?,
+                         ?, ?, ?, ?)""",
+            (s.symbol, s.interval, s.pattern_name, s.direction) + params_common,
         )
-        cur = self._conn.execute(
-            """SELECT id FROM setups
-               WHERE symbol=? AND interval=? AND pattern_name=?
-                 AND x_time=? AND a_time=? AND b_time=? AND c_time=? AND d_time=?""",
-            (s.symbol, s.interval, s.pattern_name,
-             pivots["X"].time, pivots["A"].time, pivots["B"].time,
-             pivots["C"].time, pivots["D"].time),
-        )
-        row = cur.fetchone()
-        return int(row[0]) if row else -1
+        return int(cur.lastrowid)
 
     def count_setups(self, symbol: str | None = None, interval: str | None = None) -> int:
         sql = "SELECT COUNT(*) FROM setups WHERE 1=1"
