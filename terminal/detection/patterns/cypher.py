@@ -124,18 +124,24 @@ def build_cypher_setup(m: CypherMatchResult, symbol: str, interval: str) -> Setu
     prz_low = min(prices)
     prz_high = max(prices)
 
-    # Entry: D pivot fiyatı (Carney "limit emir D'de" mantığı —
-    # NEAR örneğinden öğrenildi, PRZ %40 derinlik gibi tutucu olmasın)
+    # Entry: D pivot fiyatı (PDF "Step #2: Enter at D point" — Cypher'de
+    # D = 0.786 XC retracement).
     entry = m.d.price
 
-    # SL: 0.886 XC ötesi (PDF kuralı + küçük buffer)
-    sl_level = m.c.price + sign * SL_AT_XC * xc_len
-    stop = sl_level + sign * 0.02 * xc_len
+    # SL: X altı/üstü (PDF "Step #3: Place SL below wave X"). X swing'i
+    # kırılırsa pattern invalidate.
+    xa_len = abs(m.a.price - m.x.price)
+    sl_buf = 0.05 * xa_len  # %5 XA buffer
+    if m.direction == "bull":
+        stop = m.x.price - sl_buf
+    else:
+        stop = m.x.price + sl_buf
 
-    # TP: A seviyesi (XA leg'in başlangıç swing) ve B seviyesi
-    # Cypher'de C, A'nın ötesinde olduğu için ilk geri çekiliş hedef A
+    # TP: A noktası (PDF "Step #4: Take profit once we reach point A").
+    # TP2 = B (Cypher'de C, A'nın ötesinde olduğu için B daha derin geri
+    # çekiliş hedefi).
     tp1 = m.a.price
-    tp2 = m.b.price  # daha derin hedef (formasyon başlangıcı)
+    tp2 = m.b.price
 
     return Setup(
         symbol=symbol, interval=interval,

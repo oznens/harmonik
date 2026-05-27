@@ -163,27 +163,21 @@ def build_abcd_setup(m: AbcdMatchResult, symbol: str, interval: str) -> Setup:
     prz_high = max(prices_sorted)
     prz_range = prz_high - prz_low
 
-    # Entry: PRZ %40 derinlik (PRZ üst banttan PRZ aralığının %40'ı kadar içeri).
-    # Backtest (BTC+ETH 15m): WR 50%→64.7%, Tot +10.68R→+15.01R.
-    if m.direction == "bull":
-        entry = prz_high - 0.40 * prz_range
-    else:
-        entry = prz_low + 0.40 * prz_range
+    # Entry: D pivot fiyatı (PDF Carney "limit emir D'de" — diğer pattern'lerle
+    # uyumlu, look-ahead fix sonrası daha çok tetiklenir).
+    entry = m.d.price
 
-    # Akıllı SL: standart AB=CD projeksiyonundan %20 CD buffer kuralı pattern stop
-    # olarak korunur (yeni entry'ye göre yeterli derinlikteyse); değilse PRZ ucu
-    # + %5 buffer fallback.
-    std_entry = m.c.price + sign * m.matched_ratio * ab_len
-    cd_actual = abs(m.c.price - std_entry)
-    pattern_stop = std_entry + sign * (cd_actual * 0.20)
+    # SL: PRZ ucunun küçük buffer ötesi (PDF "X altı" ruhuna uygun — PRZ
+    # break'i pattern invalidation demek). %5 PRZ_range buffer.
     sl_buf = 0.05 * prz_range
     if m.direction == "bull":
-        stop = pattern_stop if pattern_stop < entry else (prz_low - sl_buf)
+        stop = prz_low - sl_buf
     else:
-        stop = pattern_stop if pattern_stop > entry else (prz_high + sl_buf)
+        stop = prz_high + sl_buf
 
-    # TP: AB=CD reversal'ında ilk doğal hedef B seviyesi (önceki swing).
-    # TP2 = C seviyesi (tam retracement endpoint).
+    # TP: AB=CD'de A pivotu yok (4-pivot pattern). TP1=B önceki swing,
+    # TP2=C tam retracement endpoint (PDF Butterfly TP2≈0.618 retr CD'ye
+    # konseptuel olarak benzer — bizim için C swing daha pratik).
     tp1 = m.b.price
     tp2 = m.c.price
 

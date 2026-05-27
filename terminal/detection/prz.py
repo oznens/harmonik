@@ -50,42 +50,34 @@ def compute_prz(m: MatchResult) -> dict:
 
 
 def compute_trade_levels(m: MatchResult, prz: dict) -> dict:
-    """Entry, SL, TP seviyeleri.
+    """Entry, SL, TP seviyeleri — PDF Trading Strategy Guides + Carney spec.
 
-    Entry: PRZ %40 derinlik (PRZ üst banttan PRZ aralığının %40'ı kadar içeri).
-    Stop: Pattern stop (D_ideal ötesi, spec.stop_at_xa katında) yeterli derinde
-          ise korunur; entry'ye göre yanlış taraftaysa PRZ ucu + %5 buffer.
-    TP1 = B seviyesi (önceki swing — doğal ilk hedef, AB=CD ile uyumlu).
-    TP2 = C seviyesi (tam retracement endpoint).
+    Entry: D pivot fiyatı (Carney "limit emir D'de" + PDF tüm pattern'lerde).
+    Stop: Pattern stop (PDF SL kurallarına göre spec.stop_at_xa katında).
+    TP1: B noktası (önceki swing — PDF Butterfly/Gartley/Crab için ana hedef).
+         Bat istisnası: TP1=C (PDF "Wave C and A" stratejisi).
+    TP2: A noktası (formasyon başlangıcı — PDF'in en uzak yapısal hedefi).
 
-    Backtest optimizasyonu (BTC+ETH 15m 1 ay, 31 setup):
-      D_ideal entry:        WR 50.0%, Tot +10.68R, Avg +0.67R
-      PRZ %40 + Akıllı SL:  WR 64.7%, Tot +15.01R, Avg +0.88R
+    NEAR örneğinden ders: PRZ %40 derinlik entry'de fiyat D'ye değmeden
+    yukarı uçuyordu → setup kaçırıldı. D pivot entry tetiklenmeyi maksimum
+    yapar (PDF Carney mantığı).
     """
     spec = m.spec
     q = m.quintet
     sign = _direction_sign(q.direction)
     xa_len = abs(q.a.price - q.x.price)
 
-    prz_low = prz["prz_low"]
-    prz_high = prz["prz_high"]
-    prz_range = prz_high - prz_low
+    entry = q.d.price
 
-    # PRZ %40 derinlik entry
-    if q.direction == "bull":
-        entry = prz_high - 0.40 * prz_range
+    # SL: pattern stop (A noktasının ötesi, spec.stop_at_xa cinsinden)
+    stop = q.a.price + sign * spec.stop_at_xa * xa_len
+
+    # TP'ler: Bat için TP1=C (PDF "Wave C and Wave A" stratejisi);
+    # diğer XABCD'lerde TP1=B (önceki swing — Butterfly/Gartley/Crab/...).
+    if spec.name == "Bat":
+        tp1 = q.c.price
     else:
-        entry = prz_low + 0.40 * prz_range
-
-    # Akıllı SL: pattern stop yeterliyse onu kullan, değilse PRZ ucu + %5 buffer
-    pattern_stop = q.a.price + sign * spec.stop_at_xa * xa_len
-    buf = 0.05 * prz_range
-    if q.direction == "bull":
-        stop = pattern_stop if pattern_stop < entry else (prz_low - buf)
-    else:
-        stop = pattern_stop if pattern_stop > entry else (prz_high + buf)
-
-    tp1 = q.b.price
-    tp2 = q.c.price
+        tp1 = q.b.price
+    tp2 = q.a.price  # A noktası: formasyon başlangıç swing, en uzak hedef
 
     return {"entry": entry, "stop": stop, "tp1": tp1, "tp2": tp2}

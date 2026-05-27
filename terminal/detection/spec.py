@@ -79,15 +79,15 @@ PATTERNS: dict[str, PatternSpec] = {
         stop_at_xa=1.27,
     ),
 
-    # Butterfly — B = 0.786, D = 1.27 extension. 1.618 XA KULLANILMAZ.
+    # Butterfly — B = 0.786, D = 1.27 extension. PDF: D 1.27-1.618 aralığında.
     "Butterfly": PatternSpec(
         name="Butterfly",
         b_min=0.756, b_max=0.816,
         c_min=_C_MIN, c_max=_C_MAX,
-        d_min=1.22, d_max=1.414, d_ideal=1.27,
-        bc_proj_min=1.618, bc_proj_max=2.24,
+        d_min=1.22, d_max=1.618, d_ideal=1.27,
+        bc_proj_min=1.618, bc_proj_max=2.618,
         ab_cd_target_ratios=(1.0, 1.27),
-        stop_at_xa=1.414,
+        stop_at_xa=1.618,  # PDF: SL 1.618 XA ext ötesi
     ),
 
     # Crab — B = 0.382-0.618, D = 1.618 extension.
