@@ -24,6 +24,8 @@ from terminal.cli.run_data import _normalize_interval
 from terminal.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from terminal.data.kline_poller import KlinePoller
 from terminal.data.mexc_client import MexcClient, MexcError
+from terminal.data.mexc_futures import MexcFuturesClient, MexcFuturesError
+from terminal.paper.engine import PaperEngine
 from terminal.db.store import Store
 from terminal.detection.scanner import default_threshold, scan_klines
 from terminal.lifecycle.states import ADAY, AKTIF, EO, STOP, TP, ZI
@@ -59,6 +61,8 @@ class PairWorker:
         no_potential: bool,
         use_htf: bool,
         zigzag_threshold: float | None,
+        use_futures: bool = False,
+        paper_engine: "PaperEngine | None" = None,
         startup_delay: float = 0.0,
     ) -> None:
         self.symbol = symbol
@@ -70,6 +74,8 @@ class PairWorker:
         self.include_elenen = include_elenen
         self.no_chart = no_chart
         self.no_potential = no_potential
+        self.use_futures = use_futures
+        self.paper = paper_engine
         self.use_htf = use_htf
         self.threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
         self.htf_interval = htf_for(interval) if use_htf else None
@@ -89,7 +95,8 @@ class PairWorker:
     def _on_transition(self, t: Transition) -> None:
         if self.tg is None:
             return
-        if t.new_state == ADAY:
+        # Filtreler: hem ADAY hem AKTIF için (agresif giriş = direkt AKTIF)
+        if t.new_state in (ADAY, AKTIF):
             if t.setup.elenen and not self.include_elenen:
                 return
             if t.setup.q_score and t.setup.q_score < self.min_q:
@@ -103,15 +110,25 @@ class PairWorker:
                 kar = self.store.get_karakter_score(
                     t.setup.symbol, t.setup.interval, t.setup.pattern_name, t.setup.direction,
                 )
-                # Karakter verisi var (sample >= 1) ve düşükse → atla
                 if kar is not None and kar[1] >= 2 and kar[0] < self.min_karakter:
-                    log.debug("%s karakter %.1f < %.1f, atlandı", self._tag, kar[0], self.min_karakter)
+                    log.debug("%s karakter %.1f < %.1f, atlandı",
+                              self._tag, kar[0], self.min_karakter)
                     return
+            # Freshness: çok eski D pivot bildirim yapma
             latest = self.poller.buffer.latest if self.poller else None
             if latest is not None:
                 age = (latest["open_time"] - t.setup.pivots["D"].time) // self.tracker._interval_ms()
                 if age > self.FRESH_ADAY_BARS:
                     return
+        # Paper trade engine: AKTIF → trade aç; TP/STOP/EO/ZI → kapat
+        if self.paper is not None and t.setup_id is not None:
+            if t.new_state == AKTIF:
+                self.paper.open_trade(t.setup, t.setup_id, t.trigger_time)
+            elif t.new_state in (TP, STOP, ZI, EO):
+                self.paper.close_trade(
+                    t.setup_id, t.new_state,
+                    t.trigger_price or t.setup.entry, t.trigger_time,
+                )
         try:
             if t.new_state == ADAY:
                 karakter = self.store.get_karakter_score(
@@ -124,9 +141,28 @@ class PairWorker:
                 else:
                     self.tg.send_message(caption)
             elif t.new_state == AKTIF:
-                self.tg.send_message(aktif_card(t.setup, t.trigger_price or t.setup.entry, t.trigger_time))
+                karakter = self.store.get_karakter_score(
+                    t.setup.symbol, t.setup.interval, t.setup.pattern_name, t.setup.direction,
+                )
+                caption = aday_card(t.setup, karakter=karakter)
+                # Paper bilgisi varsa ekle
+                if self.paper is not None and t.setup_id is not None:
+                    eq = self.paper.get_equity()
+                    caption += f"\n\n💰 Paper: equity ${eq:.2f}"
+                if not self.no_chart:
+                    chart = render_setup_chart(t.setup, self.poller.buffer.as_list())
+                    self.tg.send_photo(chart, caption=caption)
+                else:
+                    self.tg.send_message(caption)
             elif t.new_state in (TP, STOP, ZI, EO):
-                self.tg.send_message(exit_card(t.setup, t.new_state, t.trigger_price or t.setup.entry, t.trigger_time))
+                msg = exit_card(t.setup, t.new_state,
+                                t.trigger_price or t.setup.entry, t.trigger_time)
+                if self.paper is not None:
+                    summary = self.paper.summary()
+                    msg += (f"\n\n💰 Paper: equity ${summary['current_equity']:.2f} "
+                            f"({summary['pnl_pct']:+.1f}%) | {summary['total_trades']} trade "
+                            f"WR {summary['win_rate']:.1f}%")
+                self.tg.send_message(msg)
         except TelegramError as e:
             log.warning("%s Telegram: %s", self._tag, e)
 
@@ -195,8 +231,12 @@ class PairWorker:
         # Stagger startup → MEXC rate limit'i tampona al
         if self.startup_delay > 0:
             time.sleep(self.startup_delay)
-        log.info("%s başlıyor (ZigZag %.4f)", self._tag, self.threshold)
-        self.client = MexcClient()
+        kaynak = "FUTURES" if self.use_futures else "SPOT"
+        log.info("%s başlıyor (%s, ZigZag %.4f)", self._tag, kaynak, self.threshold)
+        if self.use_futures:
+            self.client = MexcFuturesClient()
+        else:
+            self.client = MexcClient()
         self.store = Store()
         self.tracker = LifecycleTracker(
             self.symbol, self.interval, self.store, on_transition=self._on_transition,
@@ -292,6 +332,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="RSI+hacim confluence skorunun altındaki setupları Telegram'a "
                              "yollama. Varsayılan 70 (agresif giriş + cost dahil net pozitif "
                              "olan tek eşik). WR ~85 percent ama sample az.")
+    parser.add_argument("--futures", action="store_true",
+                        help="MEXC Futures verisi kullan (default: spot). "
+                             "Sembol BTCUSDT → BTC_USDT otomatik dönüşür.")
+    parser.add_argument("--paper", action="store_true",
+                        help="Paper trade modu — gerçek emir vermeden P&L "
+                             "tracking. Her trade $20 risk, leverage SL'e göre.")
+    parser.add_argument("--paper-equity", type=float, default=1000.0,
+                        help="Paper trade başlangıç sermayesi USD (default 1000).")
+    parser.add_argument("--paper-risk", type=float, default=20.0,
+                        help="Paper trade başına risk USD (default 20).")
     parser.add_argument("--include-elenen", action="store_true")
     parser.add_argument("--no-potential", action="store_true",
                         help="Potansiyel (oluşmamış) pattern bildirimlerini kapat. "
@@ -341,6 +391,20 @@ def main(argv: list[str] | None = None) -> int:
         else:
             log.warning("Telegram env eksik → bildirim KAPALI")
 
+    # Paper trade engine — opsiyonel, paylaşımlı
+    paper_engine = None
+    if args.paper:
+        from terminal.paper.engine import PaperEngine
+        shared_store = Store()
+        paper_engine = PaperEngine(
+            shared_store, initial_equity=args.paper_equity,
+            risk_per_trade=args.paper_risk,
+        )
+        summary = paper_engine.summary()
+        log.info("PAPER TRADE: başlangıç=$%.0f, mevcut=$%.2f, toplam_trade=%d, WR=%.1f%%",
+                 summary["initial_equity"], summary["current_equity"],
+                 summary["total_trades"], summary["win_rate"])
+
     workers: list[PairWorker] = []
     threads: list[threading.Thread] = []
 
@@ -353,6 +417,7 @@ def main(argv: list[str] | None = None) -> int:
             no_chart=args.no_chart, no_potential=args.no_potential,
             use_htf=not args.no_htf,
             zigzag_threshold=args.zigzag,
+            use_futures=args.futures, paper_engine=paper_engine,
             startup_delay=idx * (args.stagger_ms / 1000.0),
         )
         workers.append(w)

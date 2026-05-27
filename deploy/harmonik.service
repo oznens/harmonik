@@ -1,0 +1,25 @@
+[Unit]
+Description=harmonik harmonic pattern tracker (paper trade)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=harmonik
+WorkingDirectory=/home/harmonik/harmonik
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/harmonik/harmonik/venv/bin/python -m terminal.cli.run_live_multi \
+    --combos-file config/tracked_combos.txt \
+    --futures \
+    --paper \
+    --paper-equity 1000 \
+    --paper-risk 20 \
+    --min-confluence 70 \
+    --log-level INFO
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/harmonik/tracker.log
+StandardError=append:/var/log/harmonik/tracker.err
+
+[Install]
+WantedBy=multi-user.target

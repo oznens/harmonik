@@ -39,6 +39,7 @@ class Transition:
     trigger_price: float | None
     trigger_time: int        # ms
     notes: str = ""
+    setup_id: int | None = None  # paper engine için DB referansı
 
 
 OnTransition = Callable[[Transition], None]
@@ -105,7 +106,8 @@ class LifecycleTracker:
                                  ev_time=setup.detected_at, price=setup.entry,
                                  notes="agresif giriş — D pivot tespit, direkt AKTIF")
             self._emit(Transition(setup, None, AKTIF, setup.entry,
-                                  setup.detected_at, "agresif giriş"))
+                                  setup.detected_at, "agresif giriş",
+                                  setup_id=setup_id))
         else:
             self.store.upsert_lifecycle(
                 setup_id=setup_id, state=ADAY,
@@ -116,7 +118,8 @@ class LifecycleTracker:
                                  ev_time=setup.detected_at, price=None,
                                  notes="aday tespit edildi")
             self._emit(Transition(setup, None, ADAY, None,
-                                  setup.detected_at, "aday tespit"))
+                                  setup.detected_at, "aday tespit",
+                                  setup_id=setup_id))
 
         if klines:
             self._backfill(setup, setup_id, klines)
@@ -272,7 +275,7 @@ class LifecycleTracker:
                              price=price, notes=notes)
         log.info("[%s %s] setup #%d: %s → %s @ %s (%s)",
                  self.symbol, self.interval, setup_id, prev, new, price, notes)
-        trans = Transition(setup, prev, new, price, t, notes)
+        trans = Transition(setup, prev, new, price, t, notes, setup_id=setup_id)
         self._emit(trans)
         return trans
 
