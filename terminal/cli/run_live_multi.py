@@ -162,6 +162,9 @@ class PairWorker:
                     self.tg.send_photo(chart, caption=caption)
                 else:
                     self.tg.send_message(caption)
+                log.info("%s [AKTIF] %s %s conf=%d Q=%d → Telegram yollandı",
+                         self._tag, t.setup.pattern_name, t.setup.direction,
+                         t.setup.confluence_score, t.setup.q_score or 0)
             elif t.new_state in (TP, STOP, ZI, EO):
                 msg = exit_card(t.setup, t.new_state,
                                 t.trigger_price or t.setup.entry, t.trigger_time)
@@ -172,7 +175,10 @@ class PairWorker:
                             f"WR {summary['win_rate']:.1f}%")
                 self.tg.send_message(msg)
         except TelegramError as e:
-            log.warning("%s Telegram: %s", self._tag, e)
+            log.warning("%s Telegram hatasi (%s): %s",
+                        self._tag, t.new_state, e)
+        except Exception as e:
+            log.exception("%s _on_transition beklenmedik hata: %s", self._tag, e)
 
     def _fetch_htf(self) -> list[dict[str, Any]] | None:
         if self.htf_interval is None or self.client is None:
@@ -341,10 +347,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Karakter skoru bu eşiğin altında olan (parite, TF, pattern, yön) "
                              "kombinasyonlarını Telegram'a gönderme. Backtest verisi yoksa "
                              "geçer (yeni kombinasyon ihtimaline karşı).")
-    parser.add_argument("--min-confluence", type=int, default=50,
+    parser.add_argument("--min-confluence", type=int, default=70,
                         help="RSI+hacim confluence skorunun altındaki setupları Telegram'a "
-                             "yollama. Varsayılan 50 — kullanıcı isteği üzerine 70'ten "
-                             "düşürüldü (daha çok aktif bildirim). 0 = filtre yok.")
+                             "yollama. Varsayılan 70 (gerçekçi cost ile net pozitif tek "
+                             "eşik). Daha çok bildirim için: 50 veya 0.")
     parser.add_argument("--futures", action="store_true",
                         help="MEXC Futures verisi kullan (default: spot). "
                              "Sembol BTCUSDT → BTC_USDT otomatik dönüşür.")
