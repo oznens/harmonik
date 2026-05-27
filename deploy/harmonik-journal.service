@@ -1,0 +1,14 @@
+[Unit]
+Description=harmonik haftalık journal özeti — Telegram
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=harmonik
+WorkingDirectory=/home/harmonik/harmonik
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/harmonik/harmonik/venv/bin/python -m terminal.cli.journal \
+    --period week \
+    --send-telegram
+StandardOutput=append:/var/log/harmonik/journal.log
+StandardError=append:/var/log/harmonik/journal.err

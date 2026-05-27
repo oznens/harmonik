@@ -1,0 +1,11 @@
+[Unit]
+Description=Haftalık journal özetini Pazar 20:00 (UTC+3) gönder
+
+[Timer]
+# Pazar 17:00 UTC = 20:00 İstanbul (UTC+3)
+OnCalendar=Sun *-*-* 17:00:00 UTC
+# VPS reboot olduğunda kaçırılan trigger varsa hemen çalıştır
+Persistent=true
+
+[Install]
+WantedBy=timers.target

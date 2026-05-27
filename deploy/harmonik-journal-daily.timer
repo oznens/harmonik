@@ -1,0 +1,10 @@
+[Unit]
+Description=Günlük journal özetini her gece 22:00 (UTC+3) gönder
+
+[Timer]
+# 22:00 İstanbul = 19:00 UTC
+OnCalendar=*-*-* 19:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
