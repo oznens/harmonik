@@ -72,12 +72,10 @@ def compute_trade_levels(m: MatchResult, prz: dict) -> dict:
     # SL: pattern stop (A noktasının ötesi, spec.stop_at_xa cinsinden)
     stop = q.a.price + sign * spec.stop_at_xa * xa_len
 
-    # TP'ler: Bat için TP1=C (PDF "Wave C and Wave A" stratejisi);
-    # diğer XABCD'lerde TP1=B (önceki swing — Butterfly/Gartley/Crab/...).
-    if spec.name == "Bat":
-        tp1 = q.c.price
-    else:
-        tp1 = q.b.price
+    # TP1=B (önceki swing — Carney AB=CD reciprocal ile uyumlu, tüm
+    # XABCD'lerde geçerli). PDF Bat TP1=C denemesi backtest'te ÇOK kötü
+    # (11/11 STOP) — geri B'ye alındı.
+    tp1 = q.b.price
     tp2 = q.a.price  # A noktası: formasyon başlangıç swing, en uzak hedef
 
     return {"entry": entry, "stop": stop, "tp1": tp1, "tp2": tp2}

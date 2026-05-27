@@ -1,13 +1,27 @@
-"""AB=CD pattern matcher testleri."""
+"""AB=CD pattern matcher testleri.
+
+NOT: Prod'da AB_CD_RATIOS = () (devre dışı — XABCD/Cypher/Shark havuzunu
+maskeliyordu). Bu testler matcher mantığını doğrular; fixture ile ratios
+geçici aktif edilir.
+"""
 from __future__ import annotations
 
+import pytest
+
+from terminal.detection.patterns import abcd
 from terminal.detection.patterns.abcd import (
-    AB_CD_RATIOS,
     AB_CD_TOLERANCE,
     build_abcd_setup,
     match_abcd,
 )
 from terminal.detection.pivots import Pivot
+
+
+@pytest.fixture(autouse=True)
+def _enable_abcd_ratios(monkeypatch):
+    """Test süresince AB=CD oranlarını aktif et (prod'da devre dışı)."""
+    monkeypatch.setattr(abcd, "AB_CD_RATIOS",
+                        (1.0, 1.13, 1.27, 1.414, 1.618, 2.0, 2.24, 2.618, 3.14, 3.618))
 
 
 def _pivots(prices: list[float], kinds: list[str]) -> list[Pivot]:
