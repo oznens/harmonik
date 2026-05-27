@@ -112,12 +112,14 @@ def test_matches_ideal_crab_bull():
     assert abs(m.d_ratio - 1.618) < 0.005
 
 
+import pytest
+
+
+@pytest.mark.skip(reason="Deep Crab PDF kapsamı dışı — spec'ten kaldırıldı")
 def test_matches_ideal_deep_crab_bull():
     prices, kinds = deep_crab_bull()
     m = match_xabcd(_pivots_from(prices, kinds))
     assert m is not None
-    # Deep Crab veya Crab (B=0.886 her ikisinin bandına girer mi?
-    # Crab b_max=0.668 → B=0.886 Crab'a uymaz. Sadece Deep Crab kalır.
     assert m.spec.name == "Deep Crab"
     assert abs(m.b_ratio - 0.886) < 0.005
 

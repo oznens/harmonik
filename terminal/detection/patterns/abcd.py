@@ -17,17 +17,11 @@ from dataclasses import dataclass
 from terminal.detection.models import Setup
 from terminal.detection.pivots import Pivot
 
-# AB=CD oranları — Carney spec'inde 10 oran var (1.0, 1.13, 1.27, 1.414, 1.618,
-# 2.0, 2.24, 2.618, 3.14, 3.618). Backtest verisinde net negatif R üretenler
-# devre dışı bırakıldı. Aktif tutulanlar (14 parite × 15m × 3 ay):
-#   1.0   (N=432 WR=37.3% TotR=+114.38) — hacim sample, ana güç
-#   1.27  (N=333 WR=51.5% TotR=+119.42) — en yüksek toplam R
-#   1.414 (N=140 WR=69.1% TotR= +74.80) — en yüksek WR
-#   1.618 (N=138 WR=61.6% TotR= +64.21) — golden ratio
-# Devre dışı:
-#   1.13 / 2.0 / 2.24 / 2.618 / 3.618 — net negatif (BTC+ETH 15m 3ay)
-#   3.14  — geniş 15m verisinde negatif (N=43, WR=44.2%, TotR=-17.27, AvgR=-0.40)
-AB_CD_RATIOS = (1.0, 1.27, 1.414, 1.618)
+# AB=CD oranları — KAPALI. PDF Trading Strategy Guides kapsamı dışı
+# (standalone AB=CD pattern olarak yer almıyor; sadece diğer pattern'lerin
+# BC=AB onayı için referans). Kullanıcı kararı: sadece PDF'in 6 ana
+# pattern'i aktif (Butterfly, Cypher, Bat, Gartley, Crab, Shark).
+AB_CD_RATIOS: tuple[float, ...] = ()
 AB_CD_TOLERANCE = 0.10
 
 # C noktası AB retracement aralığı (tüm AB=CD'lerde)
