@@ -233,26 +233,30 @@ def render_potential_chart(
     interval: str,
     klines: list[dict[str, Any]],
     zigzag_threshold: float | None = None,
+    existing_match: "Any" = None,
 ) -> bytes | None:
     """Henüz oluşmamış (D pivot yok) potansiyel pattern chart'ı.
 
-    Son 4 pivot (X-A-B-C) varsa, her spec için potansiyel D bölgesini sarı
-    kutu olarak çizer. "Fiyat D bölgesine girerse Bullish Gartley olur"
-    tipi öngörü sağlar (TradingView'de manuel çizilen olası dönüş gibi).
-
-    Returns None if no potential pattern (return early).
+    Args:
+        existing_match: opsiyonel — DB'den okunan PotentialPattern benzeri obje
+            (x, a, b, c, d_zone_low/high/ideal, b_ratio, c_ratio, spec, direction
+            attribute'ları olmalı). Verilirse pivot taraması yapılmaz, doğrudan
+            bu match çizilir (UI'da DB kayıtları için).
     """
-    threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
-    pivots = find_pivots(klines, threshold)
-    if len(pivots) < 4:
-        return None
-    # Sadece son 4 pivot — en güncel potansiyel pattern
-    last4 = pivots[-4:]
-    matches = find_potential_patterns(last4)
-    if not matches:
-        return None
-    # Birden fazla varsa en yüksek d_ideal yakın olanı al (en spesifik)
-    match = matches[0]
+    if existing_match is not None:
+        match = existing_match
+    else:
+        threshold = (zigzag_threshold if zigzag_threshold is not None
+                     else default_threshold(interval))
+        pivots = find_pivots(klines, threshold)
+        if len(pivots) < 4:
+            return None
+        last4 = pivots[-4:]
+        matches = find_potential_patterns(last4)
+        if not matches:
+            return None
+        # Birden fazla varsa ilkini al (en spesifik)
+        match = matches[0]
 
     # Zoom: X pivot'undan biraz öncesi → bar dizisi sonu (~%20 padding sağa)
     df_full = _klines_to_df(klines)
