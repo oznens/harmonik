@@ -45,7 +45,7 @@ def test_status_counts_empty(store: Store):
 def test_status_counts_with_setups(store: Store):
     s, sid = _seed_setup(store, gartley_bull)
     tracker = LifecycleTracker("TESTUSDT", "60m", store)
-    tracker.register_new(s, sid)
+    tracker.register_new(s, sid, aggressive_entry=False)
 
     p = DataProvider(store)
     sc = p.status_counts()
@@ -58,7 +58,7 @@ def test_status_counts_with_setups(store: Store):
 def test_setups_query_only_open(store: Store):
     s, sid = _seed_setup(store, gartley_bull)
     tracker = LifecycleTracker("TESTUSDT", "60m", store)
-    tracker.register_new(s, sid)
+    tracker.register_new(s, sid, aggressive_entry=False)
 
     p = DataProvider(store)
     rows = p.setups(states=["Aday", "Aktif"])

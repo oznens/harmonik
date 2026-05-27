@@ -33,7 +33,7 @@ def _bullish_setup_in_db(store: Store):
 def test_register_new_creates_aday(store: Store):
     s, sid, _ = _bullish_setup_in_db(store)
     tracker = LifecycleTracker("TEST", "60m", store)
-    tracker.register_new(s, sid)
+    tracker.register_new(s, sid, aggressive_entry=False)
     row = store.get_lifecycle(sid)
     assert row is not None
     assert row["state"] == ADAY
@@ -42,7 +42,7 @@ def test_register_new_creates_aday(store: Store):
 def test_aday_to_aktif_on_entry_touch(store: Store):
     s, sid, klines = _bullish_setup_in_db(store)
     tracker = LifecycleTracker("TEST", "60m", store)
-    tracker.register_new(s, sid)
+    tracker.register_new(s, sid, aggressive_entry=False)
 
     # Bull: fiyat entry seviyesine değdiğinde Aktif. D pivot'tan sonra bir mum
     # üretelim ki low = entry'ye eşit/altında olsun.
@@ -62,7 +62,7 @@ def test_aday_to_aktif_on_entry_touch(store: Store):
 def test_aktif_to_tp_on_high_touch(store: Store):
     s, sid, klines = _bullish_setup_in_db(store)
     tracker = LifecycleTracker("TEST", "60m", store)
-    tracker.register_new(s, sid)
+    tracker.register_new(s, sid, aggressive_entry=False)
 
     # 1) Önce Aday → Aktif
     last_t = klines[-1]["open_time"] + 3_600_000
@@ -90,7 +90,7 @@ def test_aktif_to_tp_on_high_touch(store: Store):
 def test_aktif_to_stop_on_low_break(store: Store):
     s, sid, klines = _bullish_setup_in_db(store)
     tracker = LifecycleTracker("TEST", "60m", store)
-    tracker.register_new(s, sid)
+    tracker.register_new(s, sid, aggressive_entry=False)
     last_t = klines[-1]["open_time"] + 3_600_000
 
     # Önce Aktif yap
@@ -117,7 +117,7 @@ def test_aday_to_eo_on_timeout(store: Store):
     s, sid, klines = _bullish_setup_in_db(store)
     tracker = LifecycleTracker("TEST", "60m", store,
                                 aday_bars_timeout=5)  # küçük timeout — test için
-    tracker.register_new(s, sid)
+    tracker.register_new(s, sid, aggressive_entry=False)
 
     # 6 mum, hiçbiri entry'ye değmiyor → EO
     timeout_klines = list(klines)
@@ -139,8 +139,8 @@ def test_aday_to_eo_on_timeout(store: Store):
 def test_no_double_register(store: Store):
     s, sid, _ = _bullish_setup_in_db(store)
     tracker = LifecycleTracker("TEST", "60m", store)
-    tracker.register_new(s, sid)
-    tracker.register_new(s, sid)  # idempotent
+    tracker.register_new(s, sid, aggressive_entry=False)
+    tracker.register_new(s, sid, aggressive_entry=False)  # idempotent
     # Tek lifecycle satırı, tek "aday tespit" eventi olmalı
     cur = store._conn.execute("SELECT COUNT(*) FROM setup_events WHERE setup_id = ?", (sid,))
     assert cur.fetchone()[0] == 1

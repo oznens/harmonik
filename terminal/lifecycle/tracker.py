@@ -66,32 +66,44 @@ class LifecycleTracker:
         self._silent = False
 
     def register_new(self, setup: Setup, setup_id: int,
-                     klines: list[dict[str, Any]] | None = None) -> None:
-        """Yeni tespit edilen setup'ı Aday durumunda başlat.
+                     klines: list[dict[str, Any]] | None = None,
+                     aggressive_entry: bool = True) -> None:
+        """Yeni tespit edilen setup'ı kaydet ve başlat.
 
-        Eğer `klines` verilirse, D pivot'tan sonraki tüm mumlar sırayla
-        işlenerek setup'ın güncel doğru durumu hesaplanır (backfill). Bu
-        sayede tarihsel setup'lar (D pivot eskidir) "yanlışlıkla EO" olarak
-        işaretlenmez — gerçek geçişler (TP/STOP/EO/ZI) yakalanır.
-
-        Backfill sırasında on_transition geçici olarak susturulur — eski
-        transition'lar Telegram'a gitmesin.
+        Args:
+            aggressive_entry: True (default) ise tespit anında DIRECT AKTIF —
+                fiyat entry'ye değmesini bekleme (market order denkliği).
+                False ise eski "Aday → fiyat entry'ye değince Aktif" pasif giriş.
+            klines: backfill için D pivot sonrası mum dizisi (pasif giriş'te
+                tarihsel geçişler hesaplanır).
         """
         existing = self.store.get_lifecycle(setup_id)
         if existing is not None:
             return  # zaten kayıtlı
-        self.store.upsert_lifecycle(
-            setup_id=setup_id,
-            state=ADAY,
-            state_changed_at=setup.detected_at,
-            entered_at=None,
-            exited_at=None,
-            exit_reason=None,
-        )
-        self.store.add_event(setup_id, prev=None, new=ADAY,
-                             ev_time=setup.detected_at, price=None,
-                             notes="aday tespit edildi")
-        self._emit(Transition(setup, None, ADAY, None, setup.detected_at, "aday tespit"))
+
+        if aggressive_entry:
+            # Direkt AKTIF — D pivot tespit edildi, market order varsay
+            self.store.upsert_lifecycle(
+                setup_id=setup_id, state=AKTIF,
+                state_changed_at=setup.detected_at,
+                entered_at=setup.detected_at, exited_at=None, exit_reason=None,
+            )
+            self.store.add_event(setup_id, prev=None, new=AKTIF,
+                                 ev_time=setup.detected_at, price=setup.entry,
+                                 notes="agresif giriş — D pivot tespit, direkt AKTIF")
+            self._emit(Transition(setup, None, AKTIF, setup.entry,
+                                  setup.detected_at, "agresif giriş"))
+        else:
+            self.store.upsert_lifecycle(
+                setup_id=setup_id, state=ADAY,
+                state_changed_at=setup.detected_at,
+                entered_at=None, exited_at=None, exit_reason=None,
+            )
+            self.store.add_event(setup_id, prev=None, new=ADAY,
+                                 ev_time=setup.detected_at, price=None,
+                                 notes="aday tespit edildi")
+            self._emit(Transition(setup, None, ADAY, None,
+                                  setup.detected_at, "aday tespit"))
 
         if klines:
             self._backfill(setup, setup_id, klines)
