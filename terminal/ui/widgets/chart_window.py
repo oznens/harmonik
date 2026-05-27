@@ -98,7 +98,10 @@ class ChartWindow(QDialog):
             f"{setup.pattern_name}"
             + (f"  ·  Q {setup.q_score} {setup.q_category}" if setup.q_score else "")
         )
-        self.resize(1200, 720)
+        # Pencere maksimize açılsın — kullanıcı her chart için manuel
+        # büyütmek zorunda kalmasın.
+        self.setWindowState(self.windowState() | Qt.WindowMaximized)
+        self.resize(1400, 850)  # ekran kapsamı yoksa fallback boyutu
 
         # 1) DB'den dene
         klines = _klines_from_db(store, setup)
