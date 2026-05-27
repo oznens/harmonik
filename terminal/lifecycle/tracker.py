@@ -76,7 +76,12 @@ class LifecycleTracker:
                 False ise eski "Aday → fiyat entry'ye değince Aktif" pasif giriş.
             klines: backfill için D pivot sonrası mum dizisi (pasif giriş'te
                 tarihsel geçişler hesaplanır).
+
+        Elenen setuplar (HTF_OPPOSITE_PENALIZED + HTF zıt) lifecycle'a
+        alınmaz — pozisyon açılmamalı.
         """
+        if setup.elenen:
+            return  # elenen pattern-spesifik filtre — lifecycle'a girme
         existing = self.store.get_lifecycle(setup_id)
         if existing is not None:
             return  # zaten kayıtlı
