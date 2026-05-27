@@ -103,23 +103,40 @@ def test_simulate_entry_bar_only_entry_touched_active():
     assert o.outcome == "Aktif"
 
 
-def test_simulate_ambiguous_next_bar_tp_and_sl():
-    """Giriş bir sonraki barda hem TP hem SL aynı bar içinde olursa
-    konservatif olarak STOP işaretlenir (ambiguous=True)."""
-    s, _ = _gartley_setup()  # bull setup
+def test_simulate_ambiguous_close_below_entry_is_stop():
+    """Aynı bar TP+SL touch + close ENTRY'nin ALTINDA → STOP (zararda kapandı)."""
+    s, _ = _gartley_setup()
     base_t = 1_700_000_000_000
     future = [
-        # Bar 1: sadece entry tetik (low <= prz_high)
         {"open_time": base_t, "close_time": base_t + 3_599_999,
          "open": s.entry, "high": s.entry, "low": s.entry - 0.01, "close": s.entry,
          "volume": 100, "quote_volume": 1000},
-        # Bar 2: Bull setup için → high yukarıda (TP1), low aşağıda (SL)
         {"open_time": base_t + 3_600_000, "close_time": base_t + 7_199_999,
-         "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5, "close": s.entry,
+         "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5,
+         "close": s.entry - 0.01,  # close entry'nin ALTINDA — STOP
          "volume": 100, "quote_volume": 1000},
     ]
     o = simulate_outcome(s, future)
     assert o.outcome == "STOP"
+    assert o.ambiguous is True
+
+
+def test_simulate_ambiguous_close_above_entry_is_tp():
+    """Aynı bar TP+SL touch + close ENTRY'nin ÜSTÜNDE → TP (kazançta kapandı,
+    XRPUSDT 1d rally bar tipindeki yanlış STOP'ları düzeltir)."""
+    s, _ = _gartley_setup()
+    base_t = 1_700_000_000_000
+    future = [
+        {"open_time": base_t, "close_time": base_t + 3_599_999,
+         "open": s.entry, "high": s.entry, "low": s.entry - 0.01, "close": s.entry,
+         "volume": 100, "quote_volume": 1000},
+        {"open_time": base_t + 3_600_000, "close_time": base_t + 7_199_999,
+         "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5,
+         "close": s.entry + (s.tp1 - s.entry) * 0.5,  # close TP yarısında
+         "volume": 100, "quote_volume": 1000},
+    ]
+    o = simulate_outcome(s, future)
+    assert o.outcome == "TP"
     assert o.ambiguous is True
 
 
