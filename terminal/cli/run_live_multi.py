@@ -93,9 +93,20 @@ class PairWorker:
         self._last_potential_key: tuple | None = None
 
     def _on_transition(self, t: Transition) -> None:
+        # Paper trade engine — Telegram filtrelerinden bağımsız: her AKTIF
+        # setup paper'a açılsın, her exit paper'da kapansın.
+        if self.paper is not None and t.setup_id is not None:
+            if t.new_state == AKTIF:
+                self.paper.open_trade(t.setup, t.setup_id, t.trigger_time)
+            elif t.new_state in (TP, STOP, ZI, EO):
+                self.paper.close_trade(
+                    t.setup_id, t.new_state,
+                    t.trigger_price or t.setup.entry, t.trigger_time,
+                )
+
         if self.tg is None:
             return
-        # Filtreler: hem ADAY hem AKTIF için (agresif giriş = direkt AKTIF)
+        # Telegram filtreleri: hem ADAY hem AKTIF için (agresif giriş = direkt AKTIF)
         if t.new_state in (ADAY, AKTIF):
             if t.setup.elenen and not self.include_elenen:
                 log.info("%s [%s] %s elenen → filtre dışı",
@@ -128,15 +139,6 @@ class PairWorker:
                     log.info("%s [%s] %s D pivot çok eski (%d bar) → filtre dışı",
                              self._tag, t.new_state, t.setup.pattern_name, age)
                     return
-        # Paper trade engine: AKTIF → trade aç; TP/STOP/EO/ZI → kapat
-        if self.paper is not None and t.setup_id is not None:
-            if t.new_state == AKTIF:
-                self.paper.open_trade(t.setup, t.setup_id, t.trigger_time)
-            elif t.new_state in (TP, STOP, ZI, EO):
-                self.paper.close_trade(
-                    t.setup_id, t.new_state,
-                    t.trigger_price or t.setup.entry, t.trigger_time,
-                )
         try:
             if t.new_state == ADAY:
                 karakter = self.store.get_karakter_score(
