@@ -105,12 +105,13 @@ class DataProvider:
         sc.toplam = c.execute(
             """SELECT COUNT(*) FROM setups s
                LEFT JOIN setup_lifecycle l ON l.setup_id = s.id
-               WHERE COALESCE(l.source, 'live') = 'live'"""
+               WHERE COALESCE(l.source, 'live') = 'live' AND s.elenen = 0"""
         ).fetchone()[0]
         sc.bugun_setup = c.execute(
             """SELECT COUNT(*) FROM setups s
                LEFT JOIN setup_lifecycle l ON l.setup_id = s.id
-               WHERE COALESCE(l.source, 'live') = 'live' AND s.detected_at >= ?""",
+               WHERE COALESCE(l.source, 'live') = 'live' AND s.elenen = 0
+                 AND s.detected_at >= ?""",
             (start_of_today_ms(),),
         ).fetchone()[0]
         decided = sc.tp + sc.stop
