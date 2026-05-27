@@ -56,6 +56,7 @@ class PairWorker:
         min_confluence: int,
         include_elenen: bool,
         no_chart: bool,
+        no_potential: bool,
         use_htf: bool,
         zigzag_threshold: float | None,
         startup_delay: float = 0.0,
@@ -68,6 +69,7 @@ class PairWorker:
         self.min_karakter = min_karakter
         self.include_elenen = include_elenen
         self.no_chart = no_chart
+        self.no_potential = no_potential
         self.use_htf = use_htf
         self.threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
         self.htf_interval = htf_for(interval) if use_htf else None
@@ -81,6 +83,8 @@ class PairWorker:
         self._running = False
         self._htf_cache: list[dict[str, Any]] | None = None
         self._tag = f"[{symbol} {interval}]"
+        # Potansiyel pattern dedup key — (spec_name, x_time, a_time, b_time, c_time)
+        self._last_potential_key: tuple | None = None
 
     def _on_transition(self, t: Transition) -> None:
         if self.tg is None:
@@ -150,6 +154,42 @@ class PairWorker:
                 log.info("%s [%s] %s | id=%d", self._tag, tag, s.summary(), sid)
                 self.tracker.register_new(s, sid, klines=klines)
         self.tracker.advance(klines)
+        # Potansiyel (henüz oluşmamış) pattern kontrolü — yeni X-A-B-C
+        self._check_potential(klines)
+
+    def _check_potential(self, klines: list[dict[str, Any]]) -> None:
+        """Son X-A-B-C uyumlu potansiyel pattern varsa Telegram'a kart yolla.
+        Dedup: aynı (pivots, pattern) tekrar gönderilmesin diye key tutuluyor.
+        """
+        if self.tg is None or self.no_potential:
+            return
+        from terminal.detection.pivots import find_pivots
+        from terminal.detection.potential import find_potential_patterns
+        from terminal.telegram_bot.cards import potential_card
+        from terminal.telegram_bot.charts import render_potential_chart
+        pivots = find_pivots(klines, self.threshold)
+        if len(pivots) < 4:
+            return
+        matches = find_potential_patterns(pivots[-4:])
+        if not matches:
+            return
+        m = matches[0]
+        key = (m.spec.name, m.x.time, m.a.time, m.b.time, m.c.time)
+        if key == self._last_potential_key:
+            return  # zaten gönderildi
+        self._last_potential_key = key
+        try:
+            txt = potential_card(m, self.symbol, self.interval)
+            png = None if self.no_chart else render_potential_chart(
+                self.symbol, self.interval, klines, zigzag_threshold=self.threshold)
+            if png:
+                self.tg.send_photo(png, caption=txt, parse_mode="Markdown")
+            else:
+                self.tg.send_message(txt, parse_mode="Markdown")
+            log.info("%s POTANSIYEL gönderildi: %s %s", self._tag,
+                     m.spec.name, m.direction)
+        except Exception as e:
+            log.warning("%s potansiyel kart hatası: %s", self._tag, e)
 
     def run(self) -> None:
         # Stagger startup → MEXC rate limit'i tampona al
@@ -253,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
                              "yollama. Varsayılan 60; backtest gerçekçi maliyetli net pozitif "
                              "(WR ~49 percent). Conf>=70 daha kaliteli (WR 60). 0 = filtre yok.")
     parser.add_argument("--include-elenen", action="store_true")
+    parser.add_argument("--no-potential", action="store_true",
+                        help="Potansiyel (oluşmamış) pattern bildirimlerini kapat. "
+                             "Default açık: X-A-B-C uyumlu yapılarda 'D bekleniyor' "
+                             "kartı Telegram'a yollanır.")
     parser.add_argument("--no-htf", action="store_true")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument("--stagger-ms", type=int, default=200,
@@ -306,7 +350,8 @@ def main(argv: list[str] | None = None) -> int:
             min_q=args.min_q, min_karakter=args.min_karakter,
             min_confluence=args.min_confluence,
             include_elenen=args.include_elenen,
-            no_chart=args.no_chart, use_htf=not args.no_htf,
+            no_chart=args.no_chart, no_potential=args.no_potential,
+            use_htf=not args.no_htf,
             zigzag_threshold=args.zigzag,
             startup_delay=idx * (args.stagger_ms / 1000.0),
         )

@@ -128,3 +128,23 @@ def exit_card(setup: Setup, outcome: str, exit_price: float, exit_time: int) -> 
         f"*{s.symbol}* `{s.interval}` — `{s.pattern_name}`\n"
         f"Çıkış: `{exit_price:.6g}` @ `{_fmt(exit_time)}`"
     )
+
+
+def potential_card(match, symbol: str, interval: str) -> str:
+    """Potansiyel (henüz oluşmamış) XABCD pattern Telegram kartı.
+
+    match: PotentialPattern (terminal/detection/potential.py)
+    """
+    arrow = "▲ BULL" if match.direction == "bull" else "▼ BEAR"
+    bracket = f"`{match.d_zone_low:.6g} – {match.d_zone_high:.6g}`"
+    return (
+        f"*POTANSİYEL SETUP* {arrow}   `{match.spec.name}`\n"
+        f"*{symbol}* `{interval}`\n"
+        "\n"
+        f"D bölgesi (potansiyel): {bracket}\n"
+        f"D ideal: `{match.d_ideal_price:.6g}`\n"
+        f"B={match.b_ratio:.3f}  C={match.c_ratio:.3f}\n"
+        "\n"
+        f"_Fiyat D bölgesine girerse formasyon tamamlanır._\n"
+        f"C pivot: `{_fmt(match.c.time)}`"
+    )
