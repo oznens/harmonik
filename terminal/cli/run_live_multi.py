@@ -98,12 +98,18 @@ class PairWorker:
         # Filtreler: hem ADAY hem AKTIF için (agresif giriş = direkt AKTIF)
         if t.new_state in (ADAY, AKTIF):
             if t.setup.elenen and not self.include_elenen:
+                log.info("%s [%s] %s elenen → filtre dışı",
+                         self._tag, t.new_state, t.setup.pattern_name)
                 return
             if t.setup.q_score and t.setup.q_score < self.min_q:
+                log.info("%s [%s] %s Q=%d < min_q=%d → filtre dışı",
+                         self._tag, t.new_state, t.setup.pattern_name,
+                         t.setup.q_score, self.min_q)
                 return
             if self.min_confluence > 0 and t.setup.confluence_score < self.min_confluence:
-                log.debug("%s confluence %d < %d, atlandı",
-                          self._tag, t.setup.confluence_score, self.min_confluence)
+                log.info("%s [%s] %s confluence=%d < min=%d → filtre dışı",
+                         self._tag, t.new_state, t.setup.pattern_name,
+                         t.setup.confluence_score, self.min_confluence)
                 return
             # Karakter skoru filtresi: backtest verisi varsa ve düşükse Telegram'a gitme
             if self.min_karakter > 0 and self.store is not None:
@@ -111,14 +117,16 @@ class PairWorker:
                     t.setup.symbol, t.setup.interval, t.setup.pattern_name, t.setup.direction,
                 )
                 if kar is not None and kar[1] >= 2 and kar[0] < self.min_karakter:
-                    log.debug("%s karakter %.1f < %.1f, atlandı",
-                              self._tag, kar[0], self.min_karakter)
+                    log.info("%s [%s] karakter %.1f < %.1f → filtre dışı",
+                             self._tag, t.new_state, kar[0], self.min_karakter)
                     return
             # Freshness: çok eski D pivot bildirim yapma
             latest = self.poller.buffer.latest if self.poller else None
             if latest is not None:
                 age = (latest["open_time"] - t.setup.pivots["D"].time) // self.tracker._interval_ms()
                 if age > self.FRESH_ADAY_BARS:
+                    log.info("%s [%s] %s D pivot çok eski (%d bar) → filtre dışı",
+                             self._tag, t.new_state, t.setup.pattern_name, age)
                     return
         # Paper trade engine: AKTIF → trade aç; TP/STOP/EO/ZI → kapat
         if self.paper is not None and t.setup_id is not None:
@@ -333,10 +341,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Karakter skoru bu eşiğin altında olan (parite, TF, pattern, yön) "
                              "kombinasyonlarını Telegram'a gönderme. Backtest verisi yoksa "
                              "geçer (yeni kombinasyon ihtimaline karşı).")
-    parser.add_argument("--min-confluence", type=int, default=70,
+    parser.add_argument("--min-confluence", type=int, default=50,
                         help="RSI+hacim confluence skorunun altındaki setupları Telegram'a "
-                             "yollama. Varsayılan 70 (agresif giriş + cost dahil net pozitif "
-                             "olan tek eşik). WR ~85 percent ama sample az.")
+                             "yollama. Varsayılan 50 — kullanıcı isteği üzerine 70'ten "
+                             "düşürüldü (daha çok aktif bildirim). 0 = filtre yok.")
     parser.add_argument("--futures", action="store_true",
                         help="MEXC Futures verisi kullan (default: spot). "
                              "Sembol BTCUSDT → BTC_USDT otomatik dönüşür.")
