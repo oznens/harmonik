@@ -132,7 +132,7 @@ class DataProvider:
                    COALESCE(l.source, 'live') AS source
             FROM setups s
             LEFT JOIN setup_lifecycle l ON l.setup_id = s.id
-            WHERE 1=1
+            WHERE s.elenen = 0
         """
         params: list = []
         if states:
