@@ -68,6 +68,33 @@ class Store:
                                  ("entered_price", "REAL")):
             if col not in ks_cols:
                 self._conn.execute(f"ALTER TABLE karakter_samples ADD COLUMN {col} {definition}")
+        # Potansiyel pattern tablosu — UI'da görüntülemek için kalıcı saklama
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS potential_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                interval TEXT NOT NULL,
+                pattern_name TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                x_time INTEGER NOT NULL, x_price REAL NOT NULL,
+                a_time INTEGER NOT NULL, a_price REAL NOT NULL,
+                b_time INTEGER NOT NULL, b_price REAL NOT NULL,
+                c_time INTEGER NOT NULL, c_price REAL NOT NULL,
+                d_zone_low REAL NOT NULL,
+                d_zone_high REAL NOT NULL,
+                d_ideal_price REAL NOT NULL,
+                b_ratio REAL NOT NULL,
+                c_ratio REAL NOT NULL,
+                detected_at INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'waiting',
+                UNIQUE (symbol, interval, pattern_name,
+                        x_time, a_time, b_time, c_time)
+            )
+        """)
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_potential_lookup "
+            "ON potential_patterns (symbol, interval, detected_at DESC)"
+        )
 
     def upsert_kline(self, symbol: str, interval: str, k: dict[str, Any]) -> None:
         self._conn.execute(
@@ -279,6 +306,56 @@ class Store:
     def get_lifecycle(self, setup_id: int) -> sqlite3.Row | None:
         cur = self._conn.execute("SELECT * FROM setup_lifecycle WHERE setup_id = ?", (setup_id,))
         return cur.fetchone()
+
+    # ---- potansiyel pattern (oluşumu beklenen) ----
+
+    def upsert_potential(self, symbol: str, interval: str, match) -> int:
+        """find_potential_patterns sonucu olan PotentialPattern'i DB'ye yaz.
+        Aynı X-A-B-C kombinasyonu varsa UPDATE (sadece detected_at güncellenir).
+        """
+        import time as _t
+        self._conn.execute(
+            """INSERT INTO potential_patterns
+               (symbol, interval, pattern_name, direction,
+                x_time, x_price, a_time, a_price, b_time, b_price, c_time, c_price,
+                d_zone_low, d_zone_high, d_ideal_price,
+                b_ratio, c_ratio, detected_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(symbol, interval, pattern_name,
+                           x_time, a_time, b_time, c_time)
+               DO UPDATE SET detected_at = excluded.detected_at""",
+            (
+                symbol, interval, match.spec.name, match.direction,
+                match.x.time, match.x.price, match.a.time, match.a.price,
+                match.b.time, match.b.price, match.c.time, match.c.price,
+                match.d_zone_low, match.d_zone_high, match.d_ideal_price,
+                match.b_ratio, match.c_ratio,
+                int(_t.time() * 1000),
+            ),
+        )
+        cur = self._conn.execute(
+            """SELECT id FROM potential_patterns
+               WHERE symbol=? AND interval=? AND pattern_name=?
+                 AND x_time=? AND a_time=? AND b_time=? AND c_time=?""",
+            (symbol, interval, match.spec.name,
+             match.x.time, match.a.time, match.b.time, match.c.time),
+        )
+        return int(cur.fetchone()[0])
+
+    def list_potentials(self, limit: int = 200) -> list[sqlite3.Row]:
+        cur = self._conn.execute(
+            """SELECT id, symbol, interval, pattern_name, direction,
+                      x_time, x_price, a_time, a_price, b_time, b_price,
+                      c_time, c_price,
+                      d_zone_low, d_zone_high, d_ideal_price,
+                      b_ratio, c_ratio, detected_at, status
+               FROM potential_patterns
+               WHERE status = 'waiting'
+               ORDER BY detected_at DESC
+               LIMIT ?""",
+            (limit,),
+        )
+        return cur.fetchall()
 
     def open_setups(self, symbol: str, interval: str) -> list[sqlite3.Row]:
         """Aday veya Aktif durumdaki tüm setup'lar (bu symbol/interval için)."""

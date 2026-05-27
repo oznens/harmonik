@@ -210,6 +210,11 @@ class PairWorker:
         if not matches:
             return
         m = matches[0]
+        # DB'ye yaz (UI'da görünmesi için) — dedup UNIQUE constraint ile
+        try:
+            self.store.upsert_potential(self.symbol, self.interval, m)
+        except Exception as e:
+            log.warning("%s potansiyel DB yazma: %s", self._tag, e)
         key = (m.spec.name, m.x.time, m.a.time, m.b.time, m.c.time)
         if key == self._last_potential_key:
             return  # zaten gönderildi
