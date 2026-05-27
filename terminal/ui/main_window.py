@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMainWindow, QTabWidget, QVBoxLayout, QWidget
 from terminal.db.store import Store
 from terminal.ui.data_provider import DataProvider
 from terminal.ui.status_bar import StatusBar
+from terminal.ui.widgets.journal_tab import JournalTab
 from terminal.ui.widgets.karakter_tab import KarakterTab
 from terminal.ui.widgets.results_tab import ResultsTab
 from terminal.ui.widgets.setups_tab import SetupsTab
@@ -36,10 +37,12 @@ class MainWindow(QMainWindow):
         self.setups_tab = SetupsTab(self.provider, only_open=True)
         self.results_tab = ResultsTab(self.provider)
         self.karakter_tab = KarakterTab(self.provider)
+        self.journal_tab = JournalTab(store)
 
         tabs = QTabWidget()
         tabs.addTab(self.setups_tab, "Setup'lar (Aday / Aktif)")
         tabs.addTab(self.results_tab, "Sonuçlar")
+        tabs.addTab(self.journal_tab, "📊 Journal")
         tabs.addTab(self.karakter_tab, "Parite Karakter")
 
         # Container
@@ -66,5 +69,6 @@ class MainWindow(QMainWindow):
             self.setups_tab.refresh()
             self.results_tab.refresh()
             self.karakter_tab.refresh()
+            self.journal_tab.refresh()
         except Exception:
             log.exception("UI yenileme hatası")
