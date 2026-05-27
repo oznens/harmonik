@@ -2,18 +2,17 @@
   "_meta": {
     "source": "The Ultimate Harmonic Pattern Trading Guides (Trading Strategy Guides)",
     "pdf": "kaynaklar/The-Ultimate-Harmonic-Pattern-Trading-Guides-FULL-VERSION.pdf",
-    "scope": "Sadece PDF kapsamındaki 6 ana pattern aktif. Carney'nin Alternate Bat, Deep Crab, AB=CD (standalone), 5-0, Three Drives liste dışı.",
-    "tolerance_note": "B ve D ratio'larında ±5pp tolerans uygulanır (PDF 'approximate' mantığına uygun). C noktası tüm pattern'lerde 0.382-0.886 AB retracement.",
-    "tp_strategy": "TP1=B (önceki swing, AB=CD reciprocal uyumlu), TP2=A (formasyon başlangıç swing, en uzak hedef). Entry=D pivot fiyatı.",
-    "sl_strategy": "SL = pattern_stop = A pivot ± (stop_at_xa × XA_length). PDF'in 'wave X altı/üstü' veya '1.618 XA ext ötesi' kuralları stop_at_xa katsayısında kodlanır."
+    "tolerance_band": "B ve D ratio'larında ±%5pp tolerans uygulanır. C bandı 0.30-0.95 (önceki 0.382-0.886'dan gevşetildi). Piyasada 'mükemmel' yerine 'modifiye' harmonik yapıları yakalamak için.",
+    "tp_strategy": "TP1=B (önceki swing, AB=CD reciprocal uyumlu), TP2=A (formasyon başlangıç swing). Entry=D pivot fiyatı.",
+    "sl_strategy": "SL = pattern_stop = A pivot ± (stop_at_xa × XA_length)."
   },
 
   "Gartley": {
     "pivot_order": ["X", "A", "B", "C", "D"],
-    "B": {"min": 0.568, "max": 0.668, "ideal": 0.618, "of": "XA"},
-    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
-    "D": {"min": 0.736, "max": 0.836, "ideal": 0.786, "of": "XA"},
-    "BC_proj": {"min": 1.13, "max": 1.618},
+    "B": {"min": 0.55, "max": 0.69, "ideal": 0.618, "of": "XA"},
+    "C": {"min": 0.35, "max": 0.92, "of": "AB"},
+    "D": {"min": 0.72, "max": 0.86, "ideal": 0.786, "of": "XA"},
+    "BC_proj": {"min": 1.0, "max": 1.8},
     "ab_cd_target_ratios": [1.0, 1.27],
     "stop_at_xa": 1.0,
     "tp1_pivot": "B",
@@ -22,10 +21,10 @@
 
   "Bat": {
     "pivot_order": ["X", "A", "B", "C", "D"],
-    "B": {"min": 0.382, "max": 0.618, "ideal": 0.50, "of": "XA"},
-    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
-    "D": {"min": 0.836, "max": 0.936, "ideal": 0.886, "of": "XA"},
-    "BC_proj": {"min": 1.618, "max": 2.618},
+    "B": {"min": 0.35, "max": 0.65, "ideal": 0.50, "of": "XA"},
+    "C": {"min": 0.35, "max": 0.92, "of": "AB"},
+    "D": {"min": 0.82, "max": 0.95, "ideal": 0.886, "of": "XA"},
+    "BC_proj": {"min": 1.5, "max": 2.8},
     "ab_cd_target_ratios": [1.0, 1.27],
     "stop_at_xa": 1.13,
     "tp1_pivot": "B",
@@ -34,10 +33,10 @@
 
   "Butterfly": {
     "pivot_order": ["X", "A", "B", "C", "D"],
-    "B": {"min": 0.736, "max": 0.836, "ideal": 0.786, "of": "XA"},
-    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
-    "D": {"min": 1.22, "max": 1.618, "ideal": 1.27, "of": "XA_extension"},
-    "BC_proj": {"min": 1.618, "max": 2.618},
+    "B": {"min": 0.72, "max": 0.86, "ideal": 0.786, "of": "XA"},
+    "C": {"min": 0.35, "max": 0.92, "of": "AB"},
+    "D": {"min": 1.20, "max": 1.65, "ideal": 1.27, "of": "XA_extension"},
+    "BC_proj": {"min": 1.5, "max": 2.8},
     "ab_cd_target_ratios": [1.0, 1.27],
     "stop_at_xa": 1.618,
     "tp1_pivot": "B",
@@ -46,10 +45,10 @@
 
   "Crab": {
     "pivot_order": ["X", "A", "B", "C", "D"],
-    "B": {"min": 0.332, "max": 0.668, "ideal": 0.50, "of": "XA"},
-    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
-    "D": {"min": 1.568, "max": 1.668, "ideal": 1.618, "of": "XA_extension"},
-    "BC_proj": {"min": 2.24, "max": 3.618},
+    "B": {"min": 0.30, "max": 0.70, "ideal": 0.50, "of": "XA"},
+    "C": {"min": 0.35, "max": 0.92, "of": "AB"},
+    "D": {"min": 1.55, "max": 1.70, "ideal": 1.618, "of": "XA_extension"},
+    "BC_proj": {"min": 2.0, "max": 3.8},
     "ab_cd_target_ratios": [1.0, 1.27, 1.618],
     "stop_at_xa": 2.0,
     "tp1_pivot": "B",

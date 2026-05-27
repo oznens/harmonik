@@ -17,16 +17,19 @@ from dataclasses import dataclass
 from terminal.detection.models import Setup
 from terminal.detection.pivots import Pivot
 
-# AB=CD oranları — KAPALI. PDF Trading Strategy Guides kapsamı dışı
-# (standalone AB=CD pattern olarak yer almıyor; sadece diğer pattern'lerin
-# BC=AB onayı için referans). Kullanıcı kararı: sadece PDF'in 6 ana
-# pattern'i aktif (Butterfly, Cypher, Bat, Gartley, Crab, Shark).
-AB_CD_RATIOS: tuple[float, ...] = ()
-AB_CD_TOLERANCE = 0.10
+# AB=CD oranları — sample havuzunu güçlendirir, confluence filtresi
+# kaliteyi sağlar. Sadece backtest'te net pozitif R üreten 3 ratio aktif:
+#   1.27  — en yüksek toplam R
+#   1.414 — en yüksek WR
+#   1.618 — golden ratio
+# Kötü performanslı oranlar (1.0/1.13/2.0/2.24/2.618/3.14/3.618) devre dışı.
+AB_CD_RATIOS = (1.27, 1.414, 1.618)
+AB_CD_TOLERANCE = 0.10  # CD/AB ratio'lar yakın olduğu için %10 — daha fazlası çakışır
 
-# C noktası AB retracement aralığı (tüm AB=CD'lerde)
-C_MIN = 0.382
-C_MAX = 0.886
+# C noktası AB retracement aralığı — orta gevşek (0.382-0.886 sıkıydı,
+# 0.30-0.95 çok gürültülü; 0.35-0.92 denge.)
+C_MIN = 0.35
+C_MAX = 0.92
 
 # Reciprocal eşleşmeleri — C retracement → BC projection beklentisi
 # (Perfect AB=CD bonus için kullanılır)

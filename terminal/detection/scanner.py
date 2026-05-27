@@ -24,16 +24,19 @@ from terminal.quality.score import compute_q
 
 log = logging.getLogger(__name__)
 
-# TF başı varsayılan ZigZag eşikleri (yüzde olarak)
+# TF başı varsayılan ZigZag eşikleri (yüzde olarak).
+# Kullanıcı geri bildirimi: "iç dalgaları yakala". %30 azaltma — daha
+# fazla pivot ama gürültü kontrolünde. (2x agresif denendi: sample 2.5x
+# arttı ama gerçekçi maliyetli R 5x kötüleşti. %30 daha sağlıklı denge.)
 DEFAULT_THRESHOLDS: dict[str, float] = {
-    "1m": 0.003,
-    "5m": 0.005,
-    "15m": 0.010,
-    "30m": 0.015,
-    "60m": 0.020,
-    "4h":  0.030,
-    "1d":  0.050,
-    "1W":  0.080,
+    "1m": 0.002,
+    "5m": 0.0035,
+    "15m": 0.007,
+    "30m": 0.010,
+    "60m": 0.014,
+    "4h":  0.021,
+    "1d":  0.035,
+    "1W":  0.056,
 }
 
 
