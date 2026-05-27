@@ -37,7 +37,7 @@ class Store:
         """Eski DB → yeni şema. Sadece eksik kolonları ekler (idempotent)."""
         cur = self._conn.execute("PRAGMA table_info(setups)")
         existing = {row[1] for row in cur.fetchall()}
-        # Faz 4 kolonları
+        # Faz 4 kolonları + confluence
         needed = [
             ("q_score",      "INTEGER"),
             ("q_category",   "TEXT"),
@@ -46,6 +46,10 @@ class Store:
             ("htf_trend",    "TEXT"),
             ("htf_aligned",  "INTEGER"),
             ("elenen",       "INTEGER NOT NULL DEFAULT 0"),
+            ("confluence_score",      "INTEGER"),
+            ("confluence_components", "TEXT"),
+            ("rsi_at_d",              "REAL"),
+            ("volume_ratio",          "REAL"),
         ]
         for col, definition in needed:
             if col not in existing:
@@ -132,13 +136,15 @@ class Store:
                 prz_low, prz_high, prz_components,
                 entry, stop, tp1, tp2, detected_at,
                 q_score, q_category, q_components,
-                htf_interval, htf_trend, htf_aligned, elenen
+                htf_interval, htf_trend, htf_aligned, elenen,
+                confluence_score, confluence_components, rsi_at_d, volume_ratio
             ) VALUES (?, ?, ?, ?,
                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                       ?, ?, ?, ?, ?, ?,
                       ?, ?, ?,
                       ?, ?, ?, ?, ?,
                       ?, ?, ?,
+                      ?, ?, ?, ?,
                       ?, ?, ?, ?)
             ON CONFLICT(symbol, interval, pattern_name, x_time, a_time, b_time, c_time, d_time)
             DO UPDATE SET
@@ -154,7 +160,10 @@ class Store:
                 q_score=excluded.q_score, q_category=excluded.q_category,
                 q_components=excluded.q_components,
                 htf_interval=excluded.htf_interval, htf_trend=excluded.htf_trend,
-                htf_aligned=excluded.htf_aligned, elenen=excluded.elenen
+                htf_aligned=excluded.htf_aligned, elenen=excluded.elenen,
+                confluence_score=excluded.confluence_score,
+                confluence_components=excluded.confluence_components,
+                rsi_at_d=excluded.rsi_at_d, volume_ratio=excluded.volume_ratio
             """,
             (
                 s.symbol, s.interval, s.pattern_name, s.direction,
@@ -173,6 +182,9 @@ class Store:
                 s.htf_interval, s.htf_trend,
                 (1 if s.htf_aligned else 0) if s.htf_aligned is not None else None,
                 1 if s.elenen else 0,
+                s.confluence_score if s.confluence_score else None,
+                json.dumps(s.confluence_components) if s.confluence_components else None,
+                s.rsi_at_d, s.volume_ratio,
             ),
         )
         cur = self._conn.execute(

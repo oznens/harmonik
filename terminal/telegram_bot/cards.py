@@ -23,6 +23,18 @@ def _q_badge(setup: Setup) -> str:
     return f"Q {setup.q_score} · {setup.q_category or '?'}"
 
 
+def _confluence_line(setup: Setup) -> str:
+    """RSI + hacim confluence skorunu kart satırı olarak döner."""
+    if not setup.confluence_score:
+        return ""
+    parts = [f"Confluence: `{setup.confluence_score}/100`"]
+    if setup.rsi_at_d is not None:
+        parts.append(f"RSI={setup.rsi_at_d:.0f}")
+    if setup.volume_ratio is not None:
+        parts.append(f"Vol={setup.volume_ratio:.1f}x")
+    return "  ·  ".join(parts)
+
+
 def _htf_line(setup: Setup) -> str:
     if setup.htf_interval is None or setup.htf_trend is None:
         return ""
@@ -69,6 +81,9 @@ def aday_card(setup: Setup, karakter: tuple[float, int] | None = None) -> str:
     ]
     if htf:
         lines.append(htf)
+    confluence = _confluence_line(s)
+    if confluence:
+        lines.append(confluence)
     if karakter is not None and karakter[1] >= 3:
         score, n = karakter
         lines.append(f"Karakter: `{score:.0f}/100` ({n} örneklem)")

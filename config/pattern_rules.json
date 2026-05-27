@@ -1,0 +1,80 @@
+{
+  "_meta": {
+    "source": "The Ultimate Harmonic Pattern Trading Guides (Trading Strategy Guides)",
+    "pdf": "kaynaklar/The-Ultimate-Harmonic-Pattern-Trading-Guides-FULL-VERSION.pdf",
+    "scope": "Sadece PDF kapsamındaki 6 ana pattern aktif. Carney'nin Alternate Bat, Deep Crab, AB=CD (standalone), 5-0, Three Drives liste dışı.",
+    "tolerance_note": "B ve D ratio'larında ±5pp tolerans uygulanır (PDF 'approximate' mantığına uygun). C noktası tüm pattern'lerde 0.382-0.886 AB retracement.",
+    "tp_strategy": "TP1=B (önceki swing, AB=CD reciprocal uyumlu), TP2=A (formasyon başlangıç swing, en uzak hedef). Entry=D pivot fiyatı.",
+    "sl_strategy": "SL = pattern_stop = A pivot ± (stop_at_xa × XA_length). PDF'in 'wave X altı/üstü' veya '1.618 XA ext ötesi' kuralları stop_at_xa katsayısında kodlanır."
+  },
+
+  "Gartley": {
+    "pivot_order": ["X", "A", "B", "C", "D"],
+    "B": {"min": 0.568, "max": 0.668, "ideal": 0.618, "of": "XA"},
+    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
+    "D": {"min": 0.736, "max": 0.836, "ideal": 0.786, "of": "XA"},
+    "BC_proj": {"min": 1.13, "max": 1.618},
+    "ab_cd_target_ratios": [1.0, 1.27],
+    "stop_at_xa": 1.0,
+    "tp1_pivot": "B",
+    "tp2_pivot": "A"
+  },
+
+  "Bat": {
+    "pivot_order": ["X", "A", "B", "C", "D"],
+    "B": {"min": 0.382, "max": 0.618, "ideal": 0.50, "of": "XA"},
+    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
+    "D": {"min": 0.836, "max": 0.936, "ideal": 0.886, "of": "XA"},
+    "BC_proj": {"min": 1.618, "max": 2.618},
+    "ab_cd_target_ratios": [1.0, 1.27],
+    "stop_at_xa": 1.13,
+    "tp1_pivot": "B",
+    "tp2_pivot": "A"
+  },
+
+  "Butterfly": {
+    "pivot_order": ["X", "A", "B", "C", "D"],
+    "B": {"min": 0.736, "max": 0.836, "ideal": 0.786, "of": "XA"},
+    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
+    "D": {"min": 1.22, "max": 1.618, "ideal": 1.27, "of": "XA_extension"},
+    "BC_proj": {"min": 1.618, "max": 2.618},
+    "ab_cd_target_ratios": [1.0, 1.27],
+    "stop_at_xa": 1.618,
+    "tp1_pivot": "B",
+    "tp2_pivot": "A"
+  },
+
+  "Crab": {
+    "pivot_order": ["X", "A", "B", "C", "D"],
+    "B": {"min": 0.332, "max": 0.668, "ideal": 0.50, "of": "XA"},
+    "C": {"min": 0.382, "max": 0.886, "of": "AB"},
+    "D": {"min": 1.568, "max": 1.668, "ideal": 1.618, "of": "XA_extension"},
+    "BC_proj": {"min": 2.24, "max": 3.618},
+    "ab_cd_target_ratios": [1.0, 1.27, 1.618],
+    "stop_at_xa": 2.0,
+    "tp1_pivot": "B",
+    "tp2_pivot": "A"
+  },
+
+  "Cypher": {
+    "pivot_order": ["X", "A", "B", "C", "D"],
+    "_note": "C, A'nın ÖTESİNDE (XA extension); D = XC retracement (XA değil).",
+    "B": {"min": 0.382, "max": 0.618, "of": "XA"},
+    "C_pos": {"min": 1.272, "max": 1.414, "of": "XA_extension"},
+    "D": {"target": 0.786, "tolerance": 0.05, "of": "XC"},
+    "stop": "X altı (bull) / üstü (bear) + %5 XA buffer",
+    "tp1_pivot": "A",
+    "tp2_pivot": "B"
+  },
+
+  "Shark": {
+    "pivot_order": ["O", "X", "A", "B", "C"],
+    "_note": "5-pivot, C noktası entry (D pivot yok). Bizim sistemde C=D slot'una eşlenir.",
+    "A_retr": {"min": 0.382, "max": 0.618, "of": "OX"},
+    "B_ext": {"min": 1.13, "max": 1.618, "of": "XA"},
+    "C_ext_AB": {"min": 1.618, "max": 2.24},
+    "C_retr_OB": {"min": 0.886, "max": 1.13},
+    "stop": "1.13 OB ext + %2 buffer",
+    "tp": "0.50 BC retracement veya Reciprocal AB=CD (hangisi önce)"
+  }
+}

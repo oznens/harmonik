@@ -53,6 +53,7 @@ class PairWorker:
         tg: TelegramClient | None,
         min_q: int,
         min_karakter: float,
+        min_confluence: int,
         include_elenen: bool,
         no_chart: bool,
         use_htf: bool,
@@ -63,6 +64,7 @@ class PairWorker:
         self.interval = interval
         self.tg = tg
         self.min_q = min_q
+        self.min_confluence = min_confluence
         self.min_karakter = min_karakter
         self.include_elenen = include_elenen
         self.no_chart = no_chart
@@ -87,6 +89,10 @@ class PairWorker:
             if t.setup.elenen and not self.include_elenen:
                 return
             if t.setup.q_score and t.setup.q_score < self.min_q:
+                return
+            if self.min_confluence > 0 and t.setup.confluence_score < self.min_confluence:
+                log.debug("%s confluence %d < %d, atlandı",
+                          self._tag, t.setup.confluence_score, self.min_confluence)
                 return
             # Karakter skoru filtresi: backtest verisi varsa ve düşükse Telegram'a gitme
             if self.min_karakter > 0 and self.store is not None:
@@ -242,6 +248,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Karakter skoru bu eşiğin altında olan (parite, TF, pattern, yön) "
                              "kombinasyonlarını Telegram'a gönderme. Backtest verisi yoksa "
                              "geçer (yeni kombinasyon ihtimaline karşı).")
+    parser.add_argument("--min-confluence", type=int, default=50,
+                        help="RSI+hacim confluence skorunun altındaki setupları Telegram'a "
+                             "yollama. Varsayılan 50; backtest WR ve gerçekçi R'da net iyileşme. "
+                             "0 = filtre yok.")
     parser.add_argument("--include-elenen", action="store_true")
     parser.add_argument("--no-htf", action="store_true")
     parser.add_argument("--log-level", default="INFO")
@@ -294,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
         w = PairWorker(
             symbol=sym, interval=iv, tg=tg,
             min_q=args.min_q, min_karakter=args.min_karakter,
+            min_confluence=args.min_confluence,
             include_elenen=args.include_elenen,
             no_chart=args.no_chart, use_htf=not args.no_htf,
             zigzag_threshold=args.zigzag,

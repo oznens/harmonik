@@ -47,6 +47,12 @@ class Setup:
     htf_aligned: bool | None = None                   # True/False/None (neutral veya HTF yok)
     elenen: bool = False                              # HTF zıt yön → Elenen havuzu
 
+    # Confluence skoru (RSI + hacim, PDF Agent-3 mantığı)
+    confluence_score: int = 0                         # 0-100
+    confluence_components: dict[str, float] = field(default_factory=dict)
+    rsi_at_d: float | None = None                     # D pivot anındaki RSI(14)
+    volume_ratio: float | None = None                 # D barı / 20-bar avg
+
     # Pattern ailesi: "xabcd" (Gartley/Bat/Crab/Butterfly), "abcd" (4-nokta),
     # "shark" (0-X-A-B-C), "five_zero" (X-A-B-C-D farklı kural),
     # "three_drives" (D1-R1-D2-R2-D3). UI/chart bu alana göre render eder.

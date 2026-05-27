@@ -18,6 +18,7 @@ from terminal.detection.patterns.shark import build_shark_setup, match_shark
 # PDF kapsamı dışı patternler (5-0, Three Drives) detection'a dahil edilmiyor.
 from terminal.detection.pivots import find_pivots
 from terminal.detection.prz import compute_prz, compute_trade_levels
+from terminal.quality.confluence import compute_confluence
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
 from terminal.quality.score import compute_q
 
@@ -103,6 +104,7 @@ def scan_klines(
         _normalize_sl(setup)
         if not _has_valid_rr(setup, min_rr):
             continue
+        _apply_confluence(setup, klines)
         setups.append(setup)
         seen_keys.add((m.spec.name, q.x.time, q.a.time, q.b.time, q.c.time, q.d.time))
 
@@ -124,6 +126,7 @@ def scan_klines(
         _normalize_sl(setup)
         if not _has_valid_rr(setup, min_rr):
             continue
+        _apply_confluence(setup, klines)
         setups.append(setup)
 
     # 3) 5-pivot pencerelerde Shark (0-X-A-B-C, farklı kural)
@@ -144,6 +147,7 @@ def scan_klines(
         _normalize_sl(setup)
         if not _has_valid_rr(setup, min_rr):
             continue
+        _apply_confluence(setup, klines)
         setups.append(setup)
 
     # 4) 5-pivot pencerelerde Cypher (X-A-B-C-D, C XA extension'ı)
@@ -164,6 +168,7 @@ def scan_klines(
         _normalize_sl(setup)
         if not _has_valid_rr(setup, min_rr):
             continue
+        _apply_confluence(setup, klines)
         setups.append(setup)
 
     # PDF kapsamı dışı: 5-0 ve Three Drives pattern detection devre dışı.
@@ -235,3 +240,18 @@ def _finalize(setup: Setup, htf_trend: str | None) -> None:
     setup.q_components = qr.components
     setup.htf_aligned = alignment(setup.direction, htf_trend)
     setup.elenen = _is_elenen(setup)
+
+
+def _apply_confluence(setup: Setup, klines: list[dict[str, Any]]) -> None:
+    """Setup'a RSI + hacim confluence skorunu ekle. klines D pivot dahil."""
+    d_time = setup.pivots["D"].time
+    d_idx = next((i for i, k in enumerate(klines) if k["open_time"] == d_time), None)
+    if d_idx is None:
+        return
+    b_time = setup.pivots.get("B", setup.pivots["D"]).time
+    b_idx = next((i for i, k in enumerate(klines) if k["open_time"] == b_time), None)
+    cr = compute_confluence(setup.direction, d_idx, klines, b_idx=b_idx)
+    setup.confluence_score = cr.score
+    setup.confluence_components = cr.components
+    setup.rsi_at_d = cr.rsi_at_d
+    setup.volume_ratio = cr.volume_ratio

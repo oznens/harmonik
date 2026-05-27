@@ -1,12 +1,13 @@
-"""Carney Vol.3 değerlerine göre XABCD formasyon parametreleri.
+"""XABCD formasyon parametreleri — config/pattern_rules.json'dan yüklenir.
 
-Tüm oranlar XA bacağına göredir (B retracement, D retracement/extension).
-C için AB bacağına göre retracement. BC projection için CD/BC.
-Toleranslar bandın min/max'ına dahil edilmiştir.
+Veri kaynağı: kullanıcının paylaştığı PDF (Trading Strategy Guides).
+JSON yapısı pattern kurallarını koddan ayırarak güncelleme kolaylığı sağlar.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class PatternSpec:
     # AB=CD onayı için kabul edilen CD/AB oran(lar)ı — biri D ile çakışırsa onay var
     ab_cd_target_ratios: tuple[float, ...]
 
-    # Stop loss seviyesi (XA cinsi, D'nin ötesinde)
+    # Stop loss seviyesi (XA cinsi, A pivot'unun ötesinde)
     stop_at_xa: float
 
 
@@ -44,53 +45,42 @@ _C_MAX = 0.886
 # AB=CD onayı için CD oranının hedefe yaklaşıklık toleransı (yüzde)
 AB_CD_TOLERANCE = 0.10
 
+# JSON config yolu (proje kökü/config/pattern_rules.json)
+_RULES_PATH = Path(__file__).resolve().parents[2] / "config" / "pattern_rules.json"
 
-PATTERNS: dict[str, PatternSpec] = {
-    # Gartley — 0.618 B, 0.786 D. PDF: yaklaşık değerler kabul (±5pp tolerans).
-    "Gartley": PatternSpec(
-        name="Gartley",
-        b_min=0.568, b_max=0.668,
-        c_min=_C_MIN, c_max=_C_MAX,
-        d_min=0.736, d_max=0.836, d_ideal=0.786,
-        bc_proj_min=1.13, bc_proj_max=1.618,
-        ab_cd_target_ratios=(1.0, 1.27),
-        stop_at_xa=1.0,
-    ),
 
-    # Bat — B<0.618 (0.50 ideal), D=0.886. BC ≥ 1.618 zorunlu. ±5pp D tolerans.
-    "Bat": PatternSpec(
-        name="Bat",
-        b_min=0.382, b_max=0.618,
-        c_min=_C_MIN, c_max=_C_MAX,
-        d_min=0.836, d_max=0.936, d_ideal=0.886,
-        bc_proj_min=1.618, bc_proj_max=2.618,
-        ab_cd_target_ratios=(1.0, 1.27),
-        stop_at_xa=1.13,
-    ),
+def _load_patterns() -> dict[str, PatternSpec]:
+    """JSON dosyasından XABCD pattern spec'lerini yükler.
 
-    # Butterfly — B = 0.786, D = 1.27 extension. PDF: D 1.27-1.618; B ±5pp.
-    "Butterfly": PatternSpec(
-        name="Butterfly",
-        b_min=0.736, b_max=0.836,
-        c_min=_C_MIN, c_max=_C_MAX,
-        d_min=1.22, d_max=1.618, d_ideal=1.27,
-        bc_proj_min=1.618, bc_proj_max=2.618,
-        ab_cd_target_ratios=(1.0, 1.27),
-        stop_at_xa=1.618,  # PDF: SL 1.618 XA ext ötesi
-    ),
+    JSON'daki Cypher ve Shark farklı yapıya sahip (kendi pattern modülleri
+    bu kuralları zaten içeriyor) — XABCD ailesi (B/D bandı + BC_proj olanlar)
+    burada PatternSpec'e dönüşür.
+    """
+    raw = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+    patterns: dict[str, PatternSpec] = {}
+    for name, cfg in raw.items():
+        if name.startswith("_"):  # meta alanları
+            continue
+        # XABCD pattern'i mi? B, C, D ve BC_proj alanları olmalı.
+        if not (isinstance(cfg, dict) and "B" in cfg and "C" in cfg
+                and "D" in cfg and "BC_proj" in cfg):
+            continue  # Cypher / Shark XABCD spec'i kullanmıyor
+        spec = PatternSpec(
+            name=name,
+            b_min=float(cfg["B"]["min"]),
+            b_max=float(cfg["B"]["max"]),
+            c_min=float(cfg["C"]["min"]),
+            c_max=float(cfg["C"]["max"]),
+            d_min=float(cfg["D"]["min"]),
+            d_max=float(cfg["D"]["max"]),
+            d_ideal=float(cfg["D"]["ideal"]),
+            bc_proj_min=float(cfg["BC_proj"]["min"]),
+            bc_proj_max=float(cfg["BC_proj"]["max"]),
+            ab_cd_target_ratios=tuple(float(r) for r in cfg["ab_cd_target_ratios"]),
+            stop_at_xa=float(cfg["stop_at_xa"]),
+        )
+        patterns[name] = spec
+    return patterns
 
-    # Crab — B = 0.382-0.618, D = 1.618 extension. PDF: BC 2.24-3.618.
-    "Crab": PatternSpec(
-        name="Crab",
-        b_min=0.332, b_max=0.668,
-        c_min=_C_MIN, c_max=_C_MAX,
-        d_min=1.568, d_max=1.668, d_ideal=1.618,
-        bc_proj_min=2.24, bc_proj_max=3.618,
-        ab_cd_target_ratios=(1.0, 1.27, 1.618),
-        stop_at_xa=2.0,
-    ),
-}
-# PDF Trading Strategy Guides kapsamında olmayan ve kaldırılan pattern'ler:
-# - Alternate Bat (Carney spec; PDF'te yer almıyor)
-# - Deep Crab (Carney spec; PDF'te yer almıyor)
-# Standalone pattern'ler (PDF kapsamı dışı): AB=CD, 5-0, Three Drives.
+
+PATTERNS: dict[str, PatternSpec] = _load_patterns()
