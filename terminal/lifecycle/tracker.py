@@ -64,6 +64,14 @@ class LifecycleTracker:
         self._aktif_to = aktif_bars_timeout
         # backfill sırasında True olur → on_transition'a iletilmez
         self._silent = False
+        # Otomatik temizleme: elenen setupların eski yaşam döngüsü kayıtları
+        # (önceki versiyon davranışı). Sessiz, log spam yok.
+        self.store._conn.execute(
+            """DELETE FROM setup_lifecycle WHERE setup_id IN (
+                 SELECT id FROM setups WHERE elenen = 1
+                 AND symbol = ? AND interval = ?)""",
+            (symbol, interval),
+        )
 
     def register_new(self, setup: Setup, setup_id: int,
                      klines: list[dict[str, Any]] | None = None,
