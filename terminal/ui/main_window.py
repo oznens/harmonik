@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMainWindow, QTabWidget, QVBoxLayout, QWidget
@@ -21,7 +22,7 @@ REFRESH_INTERVAL_MS = 5000  # 5 saniye
 
 
 class MainWindow(QMainWindow):
-    """Status bar + 3 sekme (Setup'lar, Sonuçlar, Karakter Lab)."""
+    """Status bar + sekmeler. DB dosyası dış değişikliklerini otomatik yakalar."""
 
     def __init__(self, store: Store) -> None:
         super().__init__()
@@ -30,6 +31,11 @@ class MainWindow(QMainWindow):
 
         self.store = store
         self.provider = DataProvider(store)
+        # DB dosyasının son değişiklik zamanı — dış değişiklik tespiti
+        try:
+            self._last_db_mtime = os.path.getmtime(store.path)
+        except Exception:
+            self._last_db_mtime = 0.0
 
         # Status bar
         self.status_bar = StatusBar()
@@ -68,6 +74,7 @@ class MainWindow(QMainWindow):
 
     def refresh_all(self) -> None:
         try:
+            self._check_db_changed()
             self.status_bar.update_counts(self.provider.status_counts())
             self.setups_tab.refresh()
             self.potential_tab.refresh()
@@ -76,3 +83,30 @@ class MainWindow(QMainWindow):
             self.journal_tab.refresh()
         except Exception:
             log.exception("UI yenileme hatası")
+
+    def _check_db_changed(self) -> None:
+        """DB dosyası dış değiştiyse Store'u yeniden aç (SCP / harici yazım).
+
+        SQLite connection cache yapabilir — fresh snapshot için connection'ı
+        kapat-aç. Tüm tabların store/provider referanslarını günceller.
+        """
+        try:
+            mtime = os.path.getmtime(self.store.path)
+        except Exception:
+            return
+        if mtime <= self._last_db_mtime:
+            return  # değişiklik yok
+        log.info("DB dosyası değişti → Store yeniden açılıyor")
+        try:
+            self.store.close()
+        except Exception:
+            pass
+        self.store = Store()
+        self.provider = DataProvider(self.store)
+        # Tabların referanslarını güncelle
+        self.setups_tab.provider = self.provider
+        self.results_tab.provider = self.provider
+        self.karakter_tab.provider = self.provider
+        self.potential_tab.store = self.store
+        self.journal_tab.store = self.store
+        self._last_db_mtime = mtime
