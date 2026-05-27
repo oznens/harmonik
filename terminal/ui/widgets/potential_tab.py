@@ -64,7 +64,7 @@ class PotentialTab(QWidget):
         info.setStyleSheet("color: #888;")
 
         refresh_btn = QPushButton("Yenile")
-        refresh_btn.clicked.connect(self.refresh)
+        refresh_btn.clicked.connect(self._force_refresh)
 
         toolbar = QHBoxLayout()
         toolbar.addWidget(self.count_label)
@@ -112,6 +112,13 @@ class PotentialTab(QWidget):
             items[3].setForeground(dir_color)
             self.model.appendRow(items)
         self.table.setSortingEnabled(True)
+
+    def _force_refresh(self) -> None:
+        mw = self.window()
+        if hasattr(mw, "refresh_all"):
+            mw.refresh_all(force=True)
+        else:
+            self.refresh()
 
     def _on_double_clicked(self, index) -> None:
         """Çift tık → potansiyel pattern chart açar.

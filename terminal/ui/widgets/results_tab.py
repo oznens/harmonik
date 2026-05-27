@@ -87,7 +87,7 @@ class ResultsTab(QWidget):
         self.source_group.idClicked.connect(lambda _id: self.refresh())
 
         refresh_btn = QPushButton("Yenile")
-        refresh_btn.clicked.connect(self.refresh)
+        refresh_btn.clicked.connect(self._force_refresh)
 
         # Üst toolbar: 2 satır filtre
         toolbar_top = QHBoxLayout()
@@ -164,6 +164,13 @@ class ResultsTab(QWidget):
                 items[5].setForeground(state_color)
             self.model.appendRow(items)
         self.table.setSortingEnabled(True)
+
+    def _force_refresh(self) -> None:
+        mw = self.window()
+        if hasattr(mw, "refresh_all"):
+            mw.refresh_all(force=True)
+        else:
+            self.refresh()
 
     def _on_row_clicked(self, index) -> None:
         # Sıralama yapıldığında model row != insertion order. Symbol+interval

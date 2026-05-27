@@ -72,9 +72,16 @@ class MainWindow(QMainWindow):
         # İlk yükleme
         self.refresh_all()
 
-    def refresh_all(self) -> None:
+    def refresh_all(self, force: bool = False) -> None:
+        """Tüm UI sekmelerini DB'den yeniden yükle.
+
+        Args:
+            force: True ise Store connection'u her zaman yeniden açılır
+                (manuel Yenile butonu). False ise sadece DB mtime
+                değişmişse reopen (5sn timer için yeterli).
+        """
         try:
-            self._check_db_changed()
+            self._check_db_changed(force=force)
             self.status_bar.update_counts(self.provider.status_counts())
             self.setups_tab.refresh()
             self.potential_tab.refresh()
@@ -84,26 +91,24 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("UI yenileme hatası")
 
-    def _check_db_changed(self) -> None:
-        """DB dosyası dış değiştiyse Store'u yeniden aç (SCP / harici yazım).
-
-        SQLite connection cache yapabilir — fresh snapshot için connection'ı
-        kapat-aç. Tüm tabların store/provider referanslarını günceller.
-        """
+    def _check_db_changed(self, force: bool = False) -> None:
+        """DB dosyası dış değiştiyse Store'u yeniden aç (SCP / harici yazım)."""
         try:
             mtime = os.path.getmtime(self.store.path)
         except Exception:
             return
-        if mtime <= self._last_db_mtime:
-            return  # değişiklik yok
-        log.info("DB dosyası değişti → Store yeniden açılıyor")
+        if not force and mtime <= self._last_db_mtime:
+            return  # değişiklik yok, force değil
+        if force:
+            log.info("Manuel yenile → Store yeniden açılıyor")
+        else:
+            log.info("DB dosyası değişti → Store yeniden açılıyor")
         try:
             self.store.close()
         except Exception:
             pass
         self.store = Store()
         self.provider = DataProvider(self.store)
-        # Tabların referanslarını güncelle
         self.setups_tab.provider = self.provider
         self.results_tab.provider = self.provider
         self.karakter_tab.provider = self.provider

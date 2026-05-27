@@ -100,7 +100,7 @@ class JournalTab(QWidget):
         )
         self.tg_btn.clicked.connect(self._send_telegram)
         refresh_btn = QPushButton("Yenile")
-        refresh_btn.clicked.connect(self.refresh)
+        refresh_btn.clicked.connect(self._force_refresh)
         period_row.addWidget(refresh_btn)
         period_row.addWidget(self.tg_btn)
 
@@ -317,6 +317,13 @@ class JournalTab(QWidget):
             items_row[0].setForeground(QColor(GREEN if color_positive else RED))
             model.appendRow(items_row)
         table.setSortingEnabled(True)
+
+    def _force_refresh(self) -> None:
+        mw = self.window()
+        if hasattr(mw, "refresh_all"):
+            mw.refresh_all(force=True)
+        else:
+            self.refresh()
 
     def _send_telegram(self) -> None:
         try:

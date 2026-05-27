@@ -93,7 +93,7 @@ class KarakterTab(QWidget):
         self.min_samples.valueChanged.connect(self._refresh_scores)
 
         refresh_btn = QPushButton("Yenile")
-        refresh_btn.clicked.connect(self.refresh)
+        refresh_btn.clicked.connect(self._force_refresh)
 
         score_toolbar = QHBoxLayout()
         score_toolbar.addWidget(QLabel("Karakter Skor Tablosu"))
@@ -232,6 +232,13 @@ class KarakterTab(QWidget):
                 items[10].setForeground(QColor(RED))
             self.model.appendRow(items)
         self.table.setSortingEnabled(True)
+
+    def _force_refresh(self) -> None:
+        mw = self.window()
+        if hasattr(mw, "refresh_all"):
+            mw.refresh_all(force=True)
+        else:
+            self.refresh()
 
     def _on_backtest(self) -> None:
         from terminal.ui.widgets.backtest_dialog import BacktestDialog

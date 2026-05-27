@@ -57,7 +57,7 @@ class SetupsTab(QWidget):
         # Üstteki kontrol satırı
         toolbar = QHBoxLayout()
         refresh_btn = QPushButton("Yenile")
-        refresh_btn.clicked.connect(self.refresh)
+        refresh_btn.clicked.connect(self._force_refresh)
         toolbar.addWidget(refresh_btn)
         toolbar.addStretch()
 
@@ -111,6 +111,14 @@ class SetupsTab(QWidget):
                 items[0].setText(r.symbol + " ⚠")
             self.model.appendRow(items)
         self.table.setSortingEnabled(True)
+
+    def _force_refresh(self) -> None:
+        """Yenile butonu — Store'u zorla yeniden açar (fresh data garantili)."""
+        mw = self.window()
+        if hasattr(mw, "refresh_all"):
+            mw.refresh_all(force=True)
+        else:
+            self.refresh()
 
     def _on_row_clicked(self, index) -> None:
         # Sıralama sonrası model index ≠ _rows index. d_time + symbol ile bul.
