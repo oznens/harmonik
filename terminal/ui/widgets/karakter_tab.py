@@ -111,6 +111,7 @@ class KarakterTab(QWidget):
         self.table = QTableView()
         self.table.setModel(self.model)
         self.table.setSortingEnabled(True)
+        self.model.setSortRole(Qt.UserRole)  # sayısal sütunlar doğru sıralansın
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -197,6 +198,7 @@ class KarakterTab(QWidget):
             direction=self.direction_filter.currentText(),
             min_samples=self.min_samples.value(),
         )
+        self.table.setSortingEnabled(False)
         self.model.removeRows(0, self.model.rowCount())
         for r in rows:
             items = [
@@ -212,11 +214,24 @@ class KarakterTab(QWidget):
                 QStandardItem(f"{r.win_rate * 100:.1f}"),
                 QStandardItem(f"{r.karakter_score:.2f}"),
             ]
+            # Sıralama değerleri — sayısal sütunlar doğru sıralansın
+            items[0].setData(r.symbol, Qt.UserRole)
+            items[1].setData(r.interval, Qt.UserRole)
+            items[2].setData(r.pattern_name, Qt.UserRole)
+            items[3].setData(r.direction, Qt.UserRole)
+            items[4].setData(int(r.sample_count), Qt.UserRole)
+            items[5].setData(int(r.tp_count), Qt.UserRole)
+            items[6].setData(int(r.stop_count), Qt.UserRole)
+            items[7].setData(int(r.eo_count), Qt.UserRole)
+            items[8].setData(int(r.zi_count), Qt.UserRole)
+            items[9].setData(float(r.win_rate * 100), Qt.UserRole)
+            items[10].setData(float(r.karakter_score), Qt.UserRole)
             if r.karakter_score >= 50:
                 items[10].setForeground(QColor(GREEN))
             elif r.karakter_score < 30:
                 items[10].setForeground(QColor(RED))
             self.model.appendRow(items)
+        self.table.setSortingEnabled(True)
 
     def _on_backtest(self) -> None:
         from terminal.ui.widgets.backtest_dialog import BacktestDialog

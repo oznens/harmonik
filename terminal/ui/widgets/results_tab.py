@@ -54,6 +54,10 @@ class ResultsTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
+        # Sütun başlığına tıklayınca sıralama; sayısal sütunlar UserRole'daki
+        # numeric değere göre, string sütunlar görünür metne göre.
+        self.table.setSortingEnabled(True)
+        self.model.setSortRole(Qt.UserRole)
         self.table.clicked.connect(self._on_row_clicked)
 
         # --- Outcome filtre butonları (toggle group, tek seçim) ---
@@ -116,7 +120,11 @@ class ResultsTab(QWidget):
         source = None if source_sel == "Hepsi" else source_sel.lower()
 
         self._rows = self.provider.setups(states=states, source=source)
+        # Sıralama performansı: doldururken sıralamayı kapat, sonra aç
+        self.table.setSortingEnabled(False)
         self.model.removeRows(0, self.model.rowCount())
+        # Outcome için stabil sıralama önceliği: TP < STOP < EO < ZI < Aday < Aktif
+        outcome_order = {"TP": 0, "STOP": 1, "EO": 2, "ZI": 3, "Aday": 4, "Aktif": 5}
         for r in self._rows:
             src_label = "BT" if r.source == "backtest" else "LV"
             src_color = "#9c27b0" if r.source == "backtest" else "#42a5f5"
@@ -133,6 +141,18 @@ class ResultsTab(QWidget):
                 QStandardItem(f"{r.tp1:.6g}"),
                 QStandardItem(_fmt(r.detected_at)),
             ]
+            # Sıralama değerleri (UserRole) — sayısal sütunlar doğru sıralanır
+            items[0].setData(src_label, Qt.UserRole)
+            items[1].setData(r.symbol, Qt.UserRole)
+            items[2].setData(r.interval, Qt.UserRole)
+            items[3].setData(r.pattern_name, Qt.UserRole)
+            items[4].setData(r.direction, Qt.UserRole)
+            items[5].setData(outcome_order.get(r.state, 99), Qt.UserRole)
+            items[6].setData(int(r.q_score) if r.q_score else -1, Qt.UserRole)
+            items[7].setData(float(r.entry), Qt.UserRole)
+            items[8].setData(float(r.stop), Qt.UserRole)
+            items[9].setData(float(r.tp1), Qt.UserRole)
+            items[10].setData(int(r.detected_at), Qt.UserRole)
             items[0].setForeground(QColor(src_color))
             dir_color = QColor(GREEN) if r.direction == "bull" else QColor(RED)
             items[4].setForeground(dir_color)
@@ -143,8 +163,17 @@ class ResultsTab(QWidget):
             if state_color:
                 items[5].setForeground(state_color)
             self.model.appendRow(items)
+        self.table.setSortingEnabled(True)
 
     def _on_row_clicked(self, index) -> None:
-        row = index.row()
-        if 0 <= row < len(self._rows):
-            self.detail.show_setup(self._rows[row], self.provider)
+        # Sıralama yapıldığında model row != insertion order. Symbol+interval
+        # +pattern+detected_at ile orijinal SetupRow'u bul.
+        symbol = self.model.item(index.row(), 1).text()
+        interval = self.model.item(index.row(), 2).text()
+        pattern = self.model.item(index.row(), 3).text()
+        det_at = self.model.item(index.row(), 10).data(Qt.UserRole)
+        for r in self._rows:
+            if (r.symbol == symbol and r.interval == interval
+                    and r.pattern_name == pattern and r.detected_at == det_at):
+                self.detail.show_setup(r, self.provider)
+                return

@@ -40,6 +40,9 @@ class SetupsTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
+        # Sütun başlığı tıklayınca sıralama (sayısal sütunlar UserRole'a göre)
+        self.table.setSortingEnabled(True)
+        self.model.setSortRole(Qt.UserRole)
         self.table.clicked.connect(self._on_row_clicked)
 
         self.detail = DetailPanel()
@@ -67,7 +70,9 @@ class SetupsTab(QWidget):
         from terminal.ui.styles import BLUE, ACCENT_GOLD, GREEN, RED, TEXT_DIM
         states = ["Aday", "Aktif"] if self.only_open else None
         self._rows = self.provider.setups(states=states)
+        self.table.setSortingEnabled(False)
         self.model.removeRows(0, self.model.rowCount())
+        state_order = {"Aktif": 0, "Aday": 1, "TP": 2, "STOP": 3, "EO": 4, "ZI": 5}
         for r in self._rows:
             items = [
                 QStandardItem(r.symbol),
@@ -81,6 +86,17 @@ class SetupsTab(QWidget):
                 QStandardItem(f"{r.tp1:.6g}"),
                 QStandardItem(_fmt(r.d_time)),
             ]
+            # Sıralama değerleri (UserRole)
+            items[0].setData(r.symbol, Qt.UserRole)
+            items[1].setData(r.interval, Qt.UserRole)
+            items[2].setData(r.pattern_name, Qt.UserRole)
+            items[3].setData(r.direction, Qt.UserRole)
+            items[4].setData(state_order.get(r.state, 99), Qt.UserRole)
+            items[5].setData(int(r.q_score) if r.q_score else -1, Qt.UserRole)
+            items[6].setData(float(r.entry), Qt.UserRole)
+            items[7].setData(float(r.stop), Qt.UserRole)
+            items[8].setData(float(r.tp1), Qt.UserRole)
+            items[9].setData(int(r.d_time), Qt.UserRole)
             # Renkler
             dir_color = QColor(GREEN) if r.direction == "bull" else QColor(RED)
             items[3].setForeground(dir_color)
@@ -94,8 +110,13 @@ class SetupsTab(QWidget):
             if r.elenen:
                 items[0].setText(r.symbol + " ⚠")
             self.model.appendRow(items)
+        self.table.setSortingEnabled(True)
 
     def _on_row_clicked(self, index) -> None:
-        row = index.row()
-        if 0 <= row < len(self._rows):
-            self.detail.show_setup(self._rows[row], self.provider)
+        # Sıralama sonrası model index ≠ _rows index. d_time + symbol ile bul.
+        symbol = self.model.item(index.row(), 0).text().replace(" ⚠", "")
+        d_time = self.model.item(index.row(), 9).data(Qt.UserRole)
+        for r in self._rows:
+            if r.symbol == symbol and r.d_time == d_time:
+                self.detail.show_setup(r, self.provider)
+                return
