@@ -21,6 +21,7 @@ class SimOutcome:
     exited_idx: int | None     # terminal duruma geçtiği kline indeksi
     exited_time: int | None    # ms
     ambiguous: bool = False    # aynı barda hem TP hem SL vurulduysa True (konservatif → STOP)
+    entered_price: float | None = None  # gerçek giriş fiyatı (aggressive = first bar open)
 
 
 def simulate_outcome(
@@ -28,6 +29,7 @@ def simulate_outcome(
     future_klines: list[dict[str, Any]],
     aday_timeout: int = 60,
     aktif_timeout: int = 120,
+    force_immediate_entry: bool = True,
 ) -> SimOutcome:
     """D pivotundan sonraki mum dizisini gez, setup outcome'unu döner.
 
@@ -36,20 +38,31 @@ def simulate_outcome(
         future_klines: D pivotundan SONRAKİ mum dizisi (D dahil değil).
         aday_timeout: Aday'da kalış limiti (mum sayısı).
         aktif_timeout: Aktif'te kalış limiti.
+        force_immediate_entry: True ise pattern doğrulanır doğrulanmaz hemen
+            Aktif (fiyat geri dönsün diye bekleme yok, EO oluşmaz). Gerçek
+            "agresif giriş" — D pivotu confirmasyonu = market order. SL/TP
+            setup'tan gelir, R hesabı pattern entry'sine göredir (referans).
+            False ise eski "Aday → fiyat entry'ye değince Aktif" pasif giriş.
 
     Returns:
         SimOutcome — terminal state'e ulaştıysa TP/STOP/EO/ZI; ulaşmadıysa
         'Aday' veya 'Aktif' (mum dizisi tükendi).
     """
-    state = "Aday"
-    entered_idx: int | None = None
-    entered_time: int | None = None
     bull = setup.direction == "bull"
-
-    # Carney tutucu girişi (live tracker ile aynı kural): D ideal seviyesi.
-    #   Bull: bar.low <= setup.entry
-    #   Bear: bar.high >= setup.entry
     entry_trigger = setup.entry
+
+    if force_immediate_entry and future_klines:
+        # İlk bar'da hemen Aktif başla — agresif giriş modu
+        # Gerçek entry fiyatı = confirmation barı open (market order denkliği)
+        state = "Aktif"
+        entered_idx = 0
+        entered_time = future_klines[0]["open_time"]
+        entered_price: float | None = future_klines[0]["open"]
+    else:
+        state = "Aday"
+        entered_idx = None
+        entered_time = None
+        entered_price = None
 
     for i, bar in enumerate(future_klines):
         if state == "Aday":
@@ -64,7 +77,7 @@ def simulate_outcome(
                                        (not bull and bar["high"] >= setup.stop)
                 if sl_touched_same_bar:
                     return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
-                                      exited_idx=i, exited_time=bar["open_time"])
+                                      exited_idx=i, exited_time=bar["open_time"], entered_price=entered_price)
                 state = "Aktif"
                 entered_idx = i
                 entered_time = bar["open_time"]
@@ -73,7 +86,7 @@ def simulate_outcome(
                 continue
             elif i >= aday_timeout:
                 return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
-                                  exited_idx=i, exited_time=bar["open_time"])
+                                  exited_idx=i, exited_time=bar["open_time"], entered_price=entered_price)
 
         if state == "Aktif":
             if bull:
@@ -97,23 +110,27 @@ def simulate_outcome(
                 outcome = "TP" if close_in_profit else "STOP"
                 return SimOutcome(outcome=outcome, entered_idx=entered_idx,
                                   entered_time=entered_time, exited_idx=i,
-                                  exited_time=bar["open_time"], ambiguous=True)
+                                  exited_time=bar["open_time"], ambiguous=True,
+                                  entered_price=entered_price)
             if hit_tp:
                 return SimOutcome(outcome="TP", entered_idx=entered_idx,
                                   entered_time=entered_time, exited_idx=i,
-                                  exited_time=bar["open_time"])
+                                  exited_time=bar["open_time"],
+                                  entered_price=entered_price)
             if hit_sl:
                 return SimOutcome(outcome="STOP", entered_idx=entered_idx,
                                   entered_time=entered_time, exited_idx=i,
-                                  exited_time=bar["open_time"])
+                                  exited_time=bar["open_time"],
+                                  entered_price=entered_price)
 
             # Zaman aşımı (Aktif'te uzun kalma)
             bars_in_aktif = i - (entered_idx or i)
             if bars_in_aktif >= aktif_timeout:
                 return SimOutcome(outcome="ZI", entered_idx=entered_idx,
                                   entered_time=entered_time, exited_idx=i,
-                                  exited_time=bar["open_time"])
+                                  exited_time=bar["open_time"],
+                                  entered_price=entered_price)
 
     # Mum dizisi tükendi, terminal durum yok
     return SimOutcome(outcome=state, entered_idx=entered_idx, entered_time=entered_time,
-                      exited_idx=None, exited_time=None)
+                      exited_idx=None, exited_time=None, entered_price=entered_price)

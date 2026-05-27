@@ -64,7 +64,8 @@ class Store:
         # karakter_samples migrasyonu (htf_trend / htf_aligned kolonları)
         cur = self._conn.execute("PRAGMA table_info(karakter_samples)")
         ks_cols = {row[1] for row in cur.fetchall()}
-        for col, definition in (("htf_trend", "TEXT"), ("htf_aligned", "INTEGER")):
+        for col, definition in (("htf_trend", "TEXT"), ("htf_aligned", "INTEGER"),
+                                 ("entered_price", "REAL")):
             if col not in ks_cols:
                 self._conn.execute(f"ALTER TABLE karakter_samples ADD COLUMN {col} {definition}")
 
@@ -362,8 +363,8 @@ class Store:
                (run_id, symbol, interval, pattern_name, direction,
                 d_time, d_price, entry, stop, tp1, q_score,
                 outcome, entered_at, exited_at, ambiguous,
-                htf_trend, htf_aligned)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                htf_trend, htf_aligned, entered_price)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id, setup.symbol, setup.interval, setup.pattern_name, setup.direction,
                 setup.pivots["D"].time, setup.pivots["D"].price,
@@ -372,6 +373,7 @@ class Store:
                 outcome.outcome, outcome.entered_time, outcome.exited_time,
                 1 if outcome.ambiguous else 0,
                 setup.htf_trend, htf_aligned_int,
+                outcome.entered_price,
             ),
         )
 

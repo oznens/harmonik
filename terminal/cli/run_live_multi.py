@@ -288,10 +288,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Karakter skoru bu eşiğin altında olan (parite, TF, pattern, yön) "
                              "kombinasyonlarını Telegram'a gönderme. Backtest verisi yoksa "
                              "geçer (yeni kombinasyon ihtimaline karşı).")
-    parser.add_argument("--min-confluence", type=int, default=60,
+    parser.add_argument("--min-confluence", type=int, default=70,
                         help="RSI+hacim confluence skorunun altındaki setupları Telegram'a "
-                             "yollama. Varsayılan 60; backtest gerçekçi maliyetli net pozitif "
-                             "(WR ~49 percent). Conf>=70 daha kaliteli (WR 60). 0 = filtre yok.")
+                             "yollama. Varsayılan 70 (agresif giriş + cost dahil net pozitif "
+                             "olan tek eşik). WR ~85 percent ama sample az.")
     parser.add_argument("--include-elenen", action="store_true")
     parser.add_argument("--no-potential", action="store_true",
                         help="Potansiyel (oluşmamış) pattern bildirimlerini kapat. "

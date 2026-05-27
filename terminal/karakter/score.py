@@ -13,23 +13,26 @@ FULL_WEIGHT_SAMPLES = 30
 
 
 def trade_r(entry: float, stop: float, tp1: float, outcome: str,
-            cost_pct: float = 0.0) -> float:
+            cost_pct: float = 0.0, actual_entry: float | None = None) -> float:
     """R puanı: TP'de +R_potansiyeli, STOP'ta -1R, EO/ZI/Aday/Aktif'te 0.
 
-    R potansiyeli = |TP1 - Entry| / |Entry - SL|
+    R potansiyeli = |TP1 - actual_entry| / |actual_entry - SL|
 
     Args:
-        cost_pct: round-trip işlem maliyeti (komisyon + spread), entry'nin
-            yüzdesi olarak. Default 0 (geriye uyumlu — saf teorik R).
-            MEXC spot için ~0.0025 (komisyon %0.2 + spread %0.05) önerilir.
-            Maliyet TP'de R'ı azaltır, STOP'ta R'ı büyütür (|R|>1).
+        entry: pattern entry (referans seviye).
+        actual_entry: gerçek giriş fiyatı (aggressive entry'de confirmation
+            barı open). None ise entry kullanılır (pasif giriş = entry'ye
+            dokunulduğunda Aktif).
+        cost_pct: round-trip işlem maliyeti, gerçek entry'nin yüzdesi.
+            MEXC spot için ~0.0025 önerilir.
     """
-    risk = abs(entry - stop)
+    actual = actual_entry if actual_entry is not None else entry
+    risk = abs(actual - stop)
     if risk <= 0:
         return 0.0
-    cost = entry * cost_pct  # mutlak fiyat birimi
+    cost = actual * cost_pct
     if outcome == "TP":
-        reward_net = abs(tp1 - entry) - cost
+        reward_net = abs(tp1 - actual) - cost
         return round(reward_net / risk, 4)
     if outcome == "STOP":
         loss_net = risk + cost

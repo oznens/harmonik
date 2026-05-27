@@ -37,7 +37,7 @@ def test_simulate_eo_no_entry_in_timeout():
                "open": s.entry + 50, "high": s.entry + 51,
                "low": s.entry + 49, "close": s.entry + 50,
                "volume": 100, "quote_volume": 1000} for i in range(70)]
-    o = simulate_outcome(s, future, aday_timeout=60)
+    o = simulate_outcome(s, future, aday_timeout=60, force_immediate_entry=False)
     assert o.outcome == "EO"
     assert o.entered_idx is None
 
@@ -54,7 +54,7 @@ def test_simulate_tp_after_entry():
          "open": s.entry, "high": s.tp1 + 0.1, "low": s.entry, "close": s.tp1,
          "volume": 100, "quote_volume": 1000},
     ]
-    o = simulate_outcome(s, future)
+    o = simulate_outcome(s, future, force_immediate_entry=False)
     assert o.outcome == "TP"
     assert o.entered_idx == 0
     assert o.exited_idx == 1
@@ -71,7 +71,7 @@ def test_simulate_stop_after_entry():
          "open": s.entry, "high": s.entry, "low": s.stop - 0.1, "close": s.stop - 0.05,
          "volume": 100, "quote_volume": 1000},
     ]
-    o = simulate_outcome(s, future)
+    o = simulate_outcome(s, future, force_immediate_entry=False)
     assert o.outcome == "STOP"
 
 
@@ -85,7 +85,7 @@ def test_simulate_entry_bar_sl_touched_skips_to_eo():
          "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5, "close": s.entry,
          "volume": 100, "quote_volume": 1000},
     ]
-    o = simulate_outcome(s, future)
+    o = simulate_outcome(s, future, force_immediate_entry=False)
     assert o.outcome == "EO"
 
 
@@ -99,7 +99,7 @@ def test_simulate_entry_bar_only_entry_touched_active():
          "open": s.entry, "high": s.tp1 + 0.5, "low": s.entry - 0.01,
          "close": s.entry, "volume": 100, "quote_volume": 1000},
     ]
-    o = simulate_outcome(s, future)
+    o = simulate_outcome(s, future, force_immediate_entry=False)
     assert o.outcome == "Aktif"
 
 
@@ -116,7 +116,7 @@ def test_simulate_ambiguous_close_below_entry_is_stop():
          "close": s.entry - 0.01,  # close entry'nin ALTINDA — STOP
          "volume": 100, "quote_volume": 1000},
     ]
-    o = simulate_outcome(s, future)
+    o = simulate_outcome(s, future, force_immediate_entry=False)
     assert o.outcome == "STOP"
     assert o.ambiguous is True
 
@@ -135,7 +135,7 @@ def test_simulate_ambiguous_close_above_entry_is_tp():
          "close": s.entry + (s.tp1 - s.entry) * 0.5,  # close TP yarısında
          "volume": 100, "quote_volume": 1000},
     ]
-    o = simulate_outcome(s, future)
+    o = simulate_outcome(s, future, force_immediate_entry=False)
     assert o.outcome == "TP"
     assert o.ambiguous is True
 
@@ -149,7 +149,7 @@ def test_simulate_aday_still_open_when_future_short():
          "open": s.entry + 50, "high": s.entry + 51, "low": s.entry + 49, "close": s.entry + 50,
          "volume": 100, "quote_volume": 1000} for i in range(5)
     ]
-    o = simulate_outcome(s, future, aday_timeout=60)
+    o = simulate_outcome(s, future, aday_timeout=60, force_immediate_entry=False)
     assert o.outcome == "Aday"
 
 
