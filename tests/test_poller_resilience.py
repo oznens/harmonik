@@ -70,3 +70,19 @@ def test_htf_time_cache_limits_requests(store: Store):
     w._fetch_htf()
     # Zaman-cache: arka arkaya çağrılar tek istekle karşılanır
     assert w.client.calls == 1
+
+
+def test_futures_global_throttle_spaces_requests(monkeypatch):
+    """Global hız sınırı: ardışık istekler min aralıkla serileşir."""
+    import time
+
+    import terminal.data.mexc_futures as mf
+    monkeypatch.setattr(mf, "_MIN_REQUEST_INTERVAL", 0.05)
+    mf.MexcFuturesClient._last_request_ts = 0.0
+
+    t0 = time.monotonic()
+    for _ in range(5):
+        mf.MexcFuturesClient._throttle()
+    elapsed = time.monotonic() - t0
+    # 5 çağrı → en az ~4 aralık (0.05×4=0.2s); toleranslı alt sınır
+    assert elapsed >= 0.05 * 4 * 0.8
