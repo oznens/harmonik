@@ -105,3 +105,32 @@ def test_karakter_scores_after_lab(store: Store):
     assert r.tp_count == 5
     assert r.stop_count == 1
     assert 0.8 < r.win_rate < 0.9
+
+
+def test_setups_has_open_paper_flag(store: Store):
+    from terminal.paper.engine import PaperEngine
+
+    s, sid = _seed_setup(store, gartley_bull)
+    LifecycleTracker("TESTUSDT", "60m", store).register_new(s, sid, aggressive_entry=True)
+    pe = PaperEngine(store)
+
+    p = DataProvider(store)
+    # Henüz paper açılmadı → işaret yok
+    assert all(not r.has_open_paper for r in p.setups())
+
+    trade = pe.open_trade(s, sid, s.detected_at)
+    assert trade is not None
+    row = next(r for r in p.setups() if r.id == sid)
+    assert row.has_open_paper is True
+
+    # Kapanınca işaret kalkar
+    pe.close_trade(sid, "TP", s.tp1, s.detected_at + 1)
+    row = next(r for r in p.setups() if r.id == sid)
+    assert row.has_open_paper is False
+
+
+def test_setups_without_paper_table_ok(store: Store):
+    # PaperEngine hiç oluşturulmadı → paper_trades tablosu yok; patlamamalı
+    s, sid = _seed_setup(store, gartley_bull)
+    rows = DataProvider(store).setups()
+    assert rows and all(not r.has_open_paper for r in rows)
