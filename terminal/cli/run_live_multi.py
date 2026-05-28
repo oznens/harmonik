@@ -127,12 +127,13 @@ class PairWorker:
         # AKTIF: hemen açma — gerçekçi giriş için SONRAKİ barın açılışından
         # doldurulmak üzere pending'e al (fill + bildirim _fill_pending_entries
         # içinde). Çıkış: paper'da kapat.
+        paper_closed = None  # bu çıkışta gerçekten bir paper pozisyonu kapandı mı
         if self.paper is not None and t.setup_id is not None:
             if t.new_state == AKTIF:
                 self._pending_entries[t.setup_id] = t.setup
                 return  # dolum sonraki barda; AKTIF kartı/bildirimi o an
             elif t.new_state in (TP, STOP, ZI, EO):
-                self.paper.close_trade(
+                paper_closed = self.paper.close_trade(
                     t.setup_id, t.new_state,
                     t.trigger_price or t.setup.entry, t.trigger_time,
                 )
@@ -196,6 +197,10 @@ class PairWorker:
                          self._tag, t.setup.pattern_name, t.setup.direction,
                          t.setup.confluence_score, t.setup.q_score or 0)
             elif t.new_state in (TP, STOP, ZI, EO):
+                # Paper modunda SADECE gerçekten paper pozisyonu kapanan coinleri
+                # bildir (Telegram = dashboard). Paper kapalıysa tüm çıkışlar.
+                if self.paper is not None and paper_closed is None:
+                    return
                 msg = exit_card(t.setup, t.new_state,
                                 t.trigger_price or t.setup.entry, t.trigger_time)
                 if self.paper is not None:
