@@ -43,6 +43,7 @@ class SetupRow:
     htf_aligned: bool | None
     elenen: bool
     source: str = "live"  # 'live' veya 'backtest'
+    has_open_paper: bool = False  # bu setup'ın halen AÇIK paper pozisyonu var mı
 
 
 @dataclass
@@ -149,7 +150,23 @@ class DataProvider:
         sql += " ORDER BY s.detected_at DESC, s.d_time DESC LIMIT ?"
         params.append(limit)
         cur = self.store._conn.execute(sql, params)
-        return [_row_to_setup(r) for r in cur.fetchall()]
+        rows = [_row_to_setup(r) for r in cur.fetchall()]
+        # Hangi setup'ların halen AÇIK paper pozisyonu var? (paper kapalıysa
+        # tablo olmayabilir → sessizce boş geç)
+        open_paper = self._open_paper_setup_ids()
+        for row in rows:
+            row.has_open_paper = row.id in open_paper
+        return rows
+
+    def _open_paper_setup_ids(self) -> set[int]:
+        """closed_at IS NULL olan paper trade'lerin setup_id kümesi."""
+        try:
+            cur = self.store._conn.execute(
+                "SELECT setup_id FROM paper_trades WHERE closed_at IS NULL"
+            )
+            return {int(r[0]) for r in cur.fetchall()}
+        except Exception:
+            return set()  # paper_trades tablosu yok (paper modu hiç kullanılmamış)
 
     # ---- backtest run özetleri ----
 

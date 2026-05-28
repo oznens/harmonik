@@ -174,6 +174,19 @@ class MexcFuturesClient:
 
         return collected[-total_bars:]
 
+    def all_tickers(self) -> list[dict[str, Any]]:
+        """Tüm futures kontratları için 24s ticker verisi.
+
+        Her öğe en azından `symbol` (örn. 'BTC_USDT') ve hacim alanları içerir
+        (`amount24` = 24s USDT cirosu, `volume24` = kontrat adedi). Hacme göre
+        parite sıralamak için kullanılır.
+        """
+        r = self._client.get("/api/v1/contract/ticker")
+        r.raise_for_status()
+        data = r.json()
+        items = data.get("data", data) if isinstance(data, dict) else data
+        return items if isinstance(items, list) else []
+
     def ping(self) -> bool:
         try:
             r = self._client.get("/api/v1/contract/ping")

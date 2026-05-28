@@ -66,6 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         level=args.log_level.upper(),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # HTTP istemci kütüphaneleri her MEXC çağrısını INFO'da loglayıp logu
+    # boğuyor — sadece uyarı ve üstünü göster.
+    for _noisy in ("httpx", "httpcore", "urllib3"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
 
     symbol = args.symbol.upper().strip()
     interval = _normalize_interval(args.interval)
@@ -187,6 +191,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         poller.bootstrap()
+        # Bootstrap sonrası: kaçan STOP/TP'yi onar (stale "Aktif" engellenir).
+        # Geçmiş çıkışlar için Telegram bildirimi yağdırmamak adına on_transition
+        # bu pas boyunca susturulur.
+        _saved_cb = tracker.on_transition
+        tracker.on_transition = None
+        try:
+            reconciled = tracker.reconcile(poller.buffer.as_list())
+        finally:
+            tracker.on_transition = _saved_cb
+        if reconciled:
+            log.info("Reconcile: %d kaçan çıkış onarıldı", len(reconciled))
         log.info("İlk tarama (ZigZag eşik=%.4f)...", threshold)
         process_new_candle(None)
         stats = store.lifecycle_stats(symbol, interval)

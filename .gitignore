@@ -25,3 +25,6 @@ venv/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Üretilen grafik önizlemesi (preview_chart.py çıktısı)
+chart_preview.html

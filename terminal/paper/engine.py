@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from terminal.db.store import Store
 from terminal.detection.models import Setup
+from terminal.lifecycle.states import TERMINAL_STATES
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +75,17 @@ def compute_position(entry: float, stop: float, equity: float,
     return round(position, 2), float(leverage)
 
 
+def _locked(fn):
+    """Metodu engine._lock altında çalıştırır (thread-safe DB erişimi)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return fn(self, *args, **kwargs)
+    return wrapper
+
+
 class PaperEngine:
     """Paper trade motoru. Store'a okuma/yazma yapar."""
 
@@ -81,6 +94,10 @@ class PaperEngine:
         self.store = store
         self.initial_equity = initial_equity
         self.risk_per_trade = risk_per_trade
+        # Paylaşılan engine birden çok worker thread'inden çağrılır; tek SQLite
+        # bağlantısı üzerinde eşzamanlı yazımları serileştir. RLock: open_trade
+        # içeride get_equity'yi de çağırıyor (yeniden girişli).
+        self._lock = threading.RLock()
         self._migrate()
         self._init_account()
 
@@ -131,12 +148,14 @@ class PaperEngine:
                 (self.initial_equity, self.initial_equity, int(time.time() * 1000)),
             )
 
+    @_locked
     def get_equity(self) -> float:
         cur = self.store._conn.execute(
             "SELECT current_equity FROM paper_account WHERE id = 1"
         )
         return float(cur.fetchone()[0])
 
+    @_locked
     def open_trade(self, setup: Setup, setup_id: int, opened_at: int,
                    entry_price: float | None = None) -> PaperTrade | None:
         """Setup Aktif olduğunda paper pozisyon aç. Zaten varsa None.
@@ -198,6 +217,7 @@ class PaperEngine:
             risk_usd=self.risk_per_trade, opened_at=opened_at,
         )
 
+    @_locked
     def close_trade(self, setup_id: int, outcome: str, exit_price: float,
                     closed_at: int) -> PaperTrade | None:
         """Setup TP/STOP/EO/ZI olduğunda paper trade'i kapat, P&L hesapla."""
@@ -261,6 +281,7 @@ class PaperEngine:
             outcome=outcome, pnl_usd=round(pnl_net, 2),
         )
 
+    @_locked
     def summary(self) -> dict[str, Any]:
         """Account özeti."""
         cur = self.store._conn.execute(
@@ -284,6 +305,7 @@ class PaperEngine:
             "win_rate": round(wr, 1),
         }
 
+    @_locked
     def open_positions(self) -> list[dict[str, Any]]:
         """Halen açık paper trade'ler."""
         cur = self.store._conn.execute(
@@ -299,3 +321,39 @@ class PaperEngine:
             }
             for r in cur.fetchall()
         ]
+
+    @_locked
+    def sync_closed_from_lifecycle(self) -> list[PaperTrade]:
+        """Lifecycle terminal (TP/STOP/ZI/EO) olduğu halde paper'da hâlâ AÇIK
+        görünen trade'leri kapat.
+
+        advance/close_trade arasındaki senkron boşluklarını onarır — örn. canlı
+        tik'te kaçan ya da thread hatasıyla yutulan close. "Stop değdi ama paper
+        hâlâ açık" durumunu giderir. Sessizdir (Telegram bildirimi göndermez);
+        yalnızca DB defterini düzeltir. P&L, paper_trades satırındaki entry/
+        stop/tp1'den hesaplanır (exit_price sadece gösterim için).
+        """
+        states = tuple(sorted(TERMINAL_STATES))
+        placeholders = ",".join("?" * len(states))
+        rows = self.store._conn.execute(
+            f"""SELECT pt.setup_id, l.state, l.exited_at, l.state_changed_at
+                FROM paper_trades pt
+                JOIN setup_lifecycle l ON l.setup_id = pt.setup_id
+                WHERE pt.closed_at IS NULL AND l.state IN ({placeholders})""",
+            states,
+        ).fetchall()
+        closed: list[PaperTrade] = []
+        for r in rows:
+            sid, state = int(r[0]), r[1]
+            setup = self.store.load_setup(sid)
+            if setup is None:
+                continue
+            price = {"TP": setup.tp1, "STOP": setup.stop}.get(state, setup.entry)
+            exit_t = int(r[2] or r[3] or time.time() * 1000)
+            trade = self.close_trade(sid, state, price, exit_t)
+            if trade is not None:
+                closed.append(trade)
+        if closed:
+            log.info("PAPER SYNC: lifecycle terminal ama açık kalan %d trade "
+                     "kapatıldı", len(closed))
+        return closed

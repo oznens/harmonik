@@ -12,7 +12,8 @@ from terminal.timeutil import format_local_short
 from terminal.ui.data_provider import DataProvider, SetupRow
 from terminal.ui.widgets.detail_panel import DetailPanel
 
-COLUMNS = ["Parite", "TF", "Pattern", "Yön", "Durum", "Q", "Entry", "SL", "TP1", "D Zamanı"]
+COLUMNS = ["Parite", "TF", "Pattern", "Yön", "Durum", "Poz",
+           "Q", "Entry", "SL", "TP1", "D Zamanı"]
 
 
 def _fmt(ms: int) -> str:
@@ -80,6 +81,7 @@ class SetupsTab(QWidget):
                 QStandardItem(r.pattern_name),
                 QStandardItem("BULL" if r.direction == "bull" else "BEAR"),
                 QStandardItem(r.state),
+                QStandardItem("●" if r.has_open_paper else ""),
                 QStandardItem(str(r.q_score) if r.q_score else "—"),
                 QStandardItem(f"{r.entry:.6g}"),
                 QStandardItem(f"{r.stop:.6g}"),
@@ -92,11 +94,12 @@ class SetupsTab(QWidget):
             items[2].setData(r.pattern_name, Qt.UserRole)
             items[3].setData(r.direction, Qt.UserRole)
             items[4].setData(state_order.get(r.state, 99), Qt.UserRole)
-            items[5].setData(int(r.q_score) if r.q_score else -1, Qt.UserRole)
-            items[6].setData(float(r.entry), Qt.UserRole)
-            items[7].setData(float(r.stop), Qt.UserRole)
-            items[8].setData(float(r.tp1), Qt.UserRole)
-            items[9].setData(int(r.d_time), Qt.UserRole)
+            items[5].setData(1 if r.has_open_paper else 0, Qt.UserRole)
+            items[6].setData(int(r.q_score) if r.q_score else -1, Qt.UserRole)
+            items[7].setData(float(r.entry), Qt.UserRole)
+            items[8].setData(float(r.stop), Qt.UserRole)
+            items[9].setData(float(r.tp1), Qt.UserRole)
+            items[10].setData(int(r.d_time), Qt.UserRole)
             # Renkler
             dir_color = QColor(GREEN) if r.direction == "bull" else QColor(RED)
             items[3].setForeground(dir_color)
@@ -107,6 +110,10 @@ class SetupsTab(QWidget):
             }.get(r.state)
             if state_color:
                 items[4].setForeground(state_color)
+            # Açık paper pozisyonu olan setup → yeşil nokta + ortalı
+            if r.has_open_paper:
+                items[5].setForeground(QColor(GREEN))
+            items[5].setTextAlignment(Qt.AlignCenter)
             if r.elenen:
                 items[0].setText(r.symbol + " ⚠")
             self.model.appendRow(items)
@@ -123,7 +130,7 @@ class SetupsTab(QWidget):
     def _on_row_clicked(self, index) -> None:
         # Sıralama sonrası model index ≠ _rows index. d_time + symbol ile bul.
         symbol = self.model.item(index.row(), 0).text().replace(" ⚠", "")
-        d_time = self.model.item(index.row(), 9).data(Qt.UserRole)
+        d_time = self.model.item(index.row(), 10).data(Qt.UserRole)
         for r in self._rows:
             if r.symbol == symbol and r.d_time == d_time:
                 self.detail.show_setup(r, self.provider)

@@ -15,6 +15,8 @@ ExecStart=/home/harmonik/harmonik/venv/bin/python -m terminal.cli.run_live_multi
     --paper-equity 1000 \
     --paper-risk 20 \
     --min-confluence 70 \
+    --poll-seconds 30 \
+    --stagger-ms 300 \
     --log-level INFO
 Restart=on-failure
 RestartSec=10

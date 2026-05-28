@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from terminal.cli.run_data import _normalize_interval
-from terminal.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from terminal.config import POLL_INTERVAL_SECONDS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from terminal.data.kline_poller import KlinePoller
 from terminal.data.mexc_client import MexcClient, MexcError
 from terminal.data.mexc_futures import MexcFuturesClient, MexcFuturesError
@@ -37,6 +37,10 @@ from terminal.telegram_bot.client import TelegramClient, TelegramError
 from terminal.timeutil import format_local
 
 log = logging.getLogger(__name__)
+
+# Potansiyel (henüz oluşmamış) pattern bildirimleri SADECE bu TF'lerde Telegram'a
+# gider — kısa vadeli TF gürültüsünü kapatır. DB'ye (UI) tüm TF'ler yazılır.
+POTENTIAL_TG_INTERVALS = {"4h", "1d"}
 
 
 def _fmt(ms: int) -> str:
@@ -64,6 +68,7 @@ class PairWorker:
         use_futures: bool = False,
         paper_engine: "PaperEngine | None" = None,
         startup_delay: float = 0.0,
+        poll_seconds: int = POLL_INTERVAL_SECONDS,
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -80,6 +85,7 @@ class PairWorker:
         self.threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
         self.htf_interval = htf_for(interval) if use_htf else None
         self.startup_delay = startup_delay
+        self.poll_seconds = poll_seconds
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -94,6 +100,9 @@ class PairWorker:
         # Gerçekçi giriş: AKTIF olan setup'lar sonraki barın açılışından
         # doldurulmak üzere burada bekler — {setup_id: Setup}.
         self._pending_entries: dict[int, Any] = {}
+        # Bootstrap reconcile sırasında True → kaçan çıkışlar paper'a yansır ama
+        # Telegram'a eski bildirim yağmuru gönderilmez.
+        self._in_reconcile = False
 
     def _on_transition(self, t: Transition) -> None:
         # Giriş geçişleri (ADAY/AKTIF) için freshness + elenen kapısı: bootstrap'ta
@@ -127,6 +136,11 @@ class PairWorker:
                     t.setup_id, t.new_state,
                     t.trigger_price or t.setup.entry, t.trigger_time,
                 )
+
+        # Reconcile catch-up: paper senkronlandı, geçmiş çıkışları Telegram'a
+        # yağdırma (deploy/restart sonrası bildirim seli olmasın).
+        if self._in_reconcile:
+            return
 
         if self.tg is None:
             return
@@ -270,6 +284,30 @@ class PairWorker:
             if self.tg is not None:
                 self._notify_trade_opened(setup, trade)
 
+    def _reconcile_open(self) -> None:
+        """Bootstrap sonrası: açık setup'larda kaçan STOP/TP'yi onar.
+
+        Süreç kapalıyken (restart/deploy/MEXC kesintisi) gerçekleşen çıkışlar
+        advance() tek-mum kontrolünden kaçar; setup yanlışlıkla "Aktif" kalır.
+        Bu pas tampondaki tüm mumları tarayıp gerçek çıkışları uygular, paper
+        defterini de senkronlar (çıkış geçişleri on_transition'dan akar).
+        """
+        if self.tracker is None or self.poller is None:
+            return
+        klines = self.poller.buffer.as_list()
+        self._in_reconcile = True
+        try:
+            transitions = self.tracker.reconcile(klines)
+        except Exception:
+            log.exception("%s reconcile hatası", self._tag)
+            return
+        finally:
+            self._in_reconcile = False
+        if transitions:
+            log.info("%s reconcile: %d kaçan geçiş onarıldı (%s)", self._tag,
+                     len(transitions),
+                     ", ".join(f"#{t.setup_id}:{t.new_state}" for t in transitions))
+
     def _process(self, _closed: dict[str, Any] | None) -> None:
         klines = self.poller.buffer.as_list()
         if len(klines) < 20:
@@ -295,12 +333,10 @@ class PairWorker:
         """Son X-A-B-C uyumlu potansiyel pattern varsa Telegram'a kart yolla.
         Dedup: aynı (pivots, pattern) tekrar gönderilmesin diye key tutuluyor.
         """
-        if self.tg is None or self.no_potential:
+        if self.no_potential:
             return
         from terminal.detection.pivots import find_pivots
         from terminal.detection.potential import find_potential_patterns
-        from terminal.telegram_bot.cards import potential_card
-        from terminal.telegram_bot.charts import render_potential_chart
         pivots = find_pivots(klines, self.threshold)
         if len(pivots) < 4:
             return
@@ -308,11 +344,17 @@ class PairWorker:
         if not matches:
             return
         m = matches[0]
-        # DB'ye yaz (UI'da görünmesi için) — dedup UNIQUE constraint ile
+        # DB'ye yaz (UI Potansiyel sekmesinde TÜM TF'ler görünsün) — dedup
+        # UNIQUE constraint ile
         try:
             self.store.upsert_potential(self.symbol, self.interval, m)
         except Exception as e:
             log.warning("%s potansiyel DB yazma: %s", self._tag, e)
+        # Telegram'a SADECE swing TF'ler (4h, 1d) — kısa TF gürültüsü kapalı.
+        if self.tg is None or self.interval not in POTENTIAL_TG_INTERVALS:
+            return
+        from terminal.telegram_bot.cards import potential_card
+        from terminal.telegram_bot.charts import render_potential_chart
         key = (m.spec.name, m.x.time, m.a.time, m.b.time, m.c.time)
         if key == self._last_potential_key:
             return  # zaten gönderildi
@@ -345,10 +387,12 @@ class PairWorker:
             self.symbol, self.interval, self.store, on_transition=self._on_transition,
         )
         self.poller = KlinePoller(
-            self.symbol, self.interval, self.client, self.store, on_closed=self._process,
+            self.symbol, self.interval, self.client, self.store,
+            on_closed=self._process, poll_seconds=self.poll_seconds,
         )
         try:
             self.poller.bootstrap()
+            self._reconcile_open()
             self._process(None)
             self._running = True
             self.poller.poll_loop()
@@ -454,12 +498,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument("--stagger-ms", type=int, default=200,
                         help="Her worker arasında bekleme (ms). Bootstrap rate limit'i tampona alır.")
+    parser.add_argument("--poll-seconds", type=int, default=POLL_INTERVAL_SECONDS,
+                        help=f"Mum yoklama aralığı (sn, varsayılan {POLL_INTERVAL_SECONDS}). "
+                             "Çok kombinasyonda (örn. 250) rate limit için 30 önerilir.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=args.log_level.upper(),
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
+    # HTTP istemci kütüphaneleri her MEXC çağrısını INFO'da loglayıp logu
+    # boğuyor (tracker.err'i şişiren satırlar) — sadece uyarı ve üstünü göster.
+    for _noisy in ("httpx", "httpcore", "urllib3"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
 
     # Combos-file > symbols+intervals cross-product
     if args.combos_file:
@@ -503,6 +554,12 @@ def main(argv: list[str] | None = None) -> int:
             shared_store, initial_equity=args.paper_equity,
             risk_per_trade=args.paper_risk,
         )
+        # Açılışta: lifecycle terminal olduğu halde açık kalmış paper trade'leri
+        # kapat (stop değdi ama paper açık kaldıysa düzeltir).
+        synced = paper_engine.sync_closed_from_lifecycle()
+        if synced:
+            log.info("PAPER SYNC: %d açık trade lifecycle ile uyumlandı (kapatıldı)",
+                     len(synced))
         summary = paper_engine.summary()
         log.info("PAPER TRADE: başlangıç=$%.0f, mevcut=$%.2f, toplam_trade=%d, WR=%.1f%%",
                  summary["initial_equity"], summary["current_equity"],
@@ -522,6 +579,7 @@ def main(argv: list[str] | None = None) -> int:
             zigzag_threshold=args.zigzag,
             use_futures=args.futures, paper_engine=paper_engine,
             startup_delay=idx * (args.stagger_ms / 1000.0),
+            poll_seconds=args.poll_seconds,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)
