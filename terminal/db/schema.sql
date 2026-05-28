@@ -215,3 +215,41 @@ CREATE TABLE IF NOT EXISTS outcome_overrides (
 
 CREATE INDEX IF NOT EXISTS idx_outcome_overrides_setup
     ON outcome_overrides (setup_id, created_at DESC);
+
+
+-- ============================================================
+-- Paper trade (PaperEngine ile paylaşımlı; burada da tanımlı ki her Store
+-- bağlantısı — UI force-refresh dahil — bu tablolara sahip olsun).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS paper_account (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    initial_equity  REAL NOT NULL,
+    current_equity  REAL NOT NULL,
+    total_trades    INTEGER NOT NULL DEFAULT 0,
+    tp_count        INTEGER NOT NULL DEFAULT 0,
+    stop_count      INTEGER NOT NULL DEFAULT 0,
+    total_pnl       REAL NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    setup_id      INTEGER NOT NULL UNIQUE,
+    symbol        TEXT NOT NULL,
+    interval      TEXT NOT NULL,
+    pattern       TEXT NOT NULL,
+    direction     TEXT NOT NULL,
+    entry_price   REAL NOT NULL,
+    stop_price    REAL NOT NULL,
+    tp1_price     REAL NOT NULL,
+    position_usd  REAL NOT NULL,
+    leverage      REAL NOT NULL,
+    risk_usd      REAL NOT NULL,
+    opened_at     INTEGER NOT NULL,
+    closed_at     INTEGER,
+    exit_price    REAL,
+    outcome       TEXT,
+    pnl_usd       REAL,
+    FOREIGN KEY (setup_id) REFERENCES setups(id) ON DELETE CASCADE
+);

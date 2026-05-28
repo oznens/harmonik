@@ -107,11 +107,12 @@ class MainWindow(QMainWindow):
             log.info("Manuel yenile → Store yeniden açılıyor")
         else:
             log.info("DB dosyası değişti → Store yeniden açılıyor")
+        path = self.store.path
         try:
             self.store.close()
         except Exception:
             pass
-        self.store = Store()
+        self.store = Store(path)
         self.provider = DataProvider(self.store)
         self.setups_tab.provider = self.provider
         self.results_tab.provider = self.provider
