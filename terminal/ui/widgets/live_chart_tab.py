@@ -28,8 +28,8 @@ log = logging.getLogger(__name__)
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
 _HTML = _ASSETS / "chart.html"
 
-LIVE_INTERVAL_MS = 5000      # canlı mum yoklama sıklığı
-FULL_REBUILD_EVERY = 6       # her N canlı tikte bir overlay'leri tam yenile
+LIVE_INTERVAL_MS = 2000      # canlı mum yoklama sıklığı (2sn — daha akıcı fiyat)
+FULL_REBUILD_EVERY = 15      # her N canlı tikte overlay tam yenile (15×2sn≈30sn)
 
 
 class ChartBridge(QObject):
