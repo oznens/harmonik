@@ -82,7 +82,10 @@ class KlinePoller:
         """Tek bir polling adımı. İşlenen yeni kapanmış mum sayısını döner."""
         try:
             klines = self.client.klines(self.symbol, self.interval, limit=5)
-        except MexcError as e:
+        except Exception as e:
+            # Ağ / rate-limit (MEXC 510) / API / parse hatası → bu yoklamayı
+            # ATLA, worker'ı ÖLDÜRME. (Spot MexcError + futures MexcFuturesError
+            # ayrı sınıflar; geniş yakalama dayanıklılık için.)
             log.warning("%s polling hatası: %s", self._tag, e)
             return 0
 
@@ -121,7 +124,11 @@ class KlinePoller:
         self._running = True
         log.info("%s polling döngüsü başladı (her %ds)", self._tag, self._poll_seconds)
         while self._running:
-            self.poll_once()
+            try:
+                self.poll_once()
+            except Exception:
+                # Beklenmedik hata bile worker'ı düşürmesin — döngü devam etsin.
+                log.exception("%s poll_once beklenmedik hata (devam ediliyor)", self._tag)
             # Sleep'i küçük adımlara böl ki Ctrl+C hızlı yakalansın
             slept = 0.0
             while self._running and slept < self._poll_seconds:
