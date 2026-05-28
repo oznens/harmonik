@@ -27,14 +27,24 @@ _INTERVAL_MS = {
 }
 
 
-def _klines_from_db(store: Store, setup: Setup,
-                    padding_before: int = 10, padding_after: int = 30) -> list[dict] | None:
-    """X öncesinden D sonrasına kadar mumları DB'den getir; yetersizse None."""
+def _window_bounds(setup: Setup, exit_time: int | None,
+                   padding_before: int, padding_after: int,
+                   padding_after_exit: int = 8) -> tuple[int, int]:
+    """Chart penceresi (start_t, end_t). Kapanmışsa çıkışa kadar uzar."""
     interval_ms = _INTERVAL_MS.get(setup.interval, 3_600_000)
-    x_time = setup.pivots["X"].time
-    d_time = setup.pivots["D"].time
-    start_t = x_time - padding_before * interval_ms
-    end_t = d_time + padding_after * interval_ms
+    start_t = setup.pivots["X"].time - padding_before * interval_ms
+    if exit_time is not None:
+        end_t = exit_time + padding_after_exit * interval_ms
+    else:
+        end_t = setup.pivots["D"].time + padding_after * interval_ms
+    return start_t, end_t
+
+
+def _klines_from_db(store: Store, setup: Setup, exit_time: int | None = None,
+                    padding_before: int = 10, padding_after: int = 30) -> list[dict] | None:
+    """X öncesinden D (veya çıkış) sonrasına kadar mumları DB'den getir; yetersizse None."""
+    interval_ms = _INTERVAL_MS.get(setup.interval, 3_600_000)
+    start_t, end_t = _window_bounds(setup, exit_time, padding_before, padding_after)
 
     cur = store._conn.execute(
         """SELECT open_time, close_time, open, high, low, close, volume, quote_volume
@@ -58,7 +68,7 @@ def _klines_from_db(store: Store, setup: Setup,
     ]
 
 
-def _klines_from_mexc(setup: Setup,
+def _klines_from_mexc(setup: Setup, exit_time: int | None = None,
                      padding_before: int = 10, padding_after: int = 30) -> list[dict] | None:
     """MEXC'den gerekli pencereyi çek (paginated, doğru tarih aralığı).
 
@@ -66,10 +76,7 @@ def _klines_from_mexc(setup: Setup,
     geçerek doğru zaman penceresinin sonundan geriye doğru çek.
     """
     interval_ms = _INTERVAL_MS.get(setup.interval, 3_600_000)
-    x_time = setup.pivots["X"].time
-    d_time = setup.pivots["D"].time
-    start_t = x_time - padding_before * interval_ms
-    end_t = d_time + padding_after * interval_ms
+    start_t, end_t = _window_bounds(setup, exit_time, padding_before, padding_after)
     bars_needed = int((end_t - start_t) // interval_ms) + 30  # ekstra tampon
     bars_needed = max(bars_needed, 100)
     try:
@@ -88,10 +95,24 @@ def _klines_from_mexc(setup: Setup,
     return [k for k in klines if start_t <= k["open_time"] <= end_t]
 
 
+def _lifecycle_exit(store: Store, setup_id: int | None) -> tuple[int, str] | None:
+    """Kapanmış setup için (exit_time_ms, outcome). Açık/bilinmiyorsa None."""
+    if setup_id is None:
+        return None
+    try:
+        row = store.get_lifecycle(setup_id)
+    except Exception:
+        return None
+    if row and row["state"] in ("TP", "STOP", "ZI", "EO") and row["exited_at"]:
+        return int(row["exited_at"]), row["state"]
+    return None
+
+
 class ChartWindow(QDialog):
     """Setup için gömülü chart gösteren modal pencere."""
 
-    def __init__(self, setup: Setup, store: Store, parent=None) -> None:
+    def __init__(self, setup: Setup, store: Store, parent=None,
+                 setup_id: int | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(
             f"{setup.symbol} {setup.interval} — {setup.direction.upper()} "
@@ -103,12 +124,16 @@ class ChartWindow(QDialog):
         self.setWindowState(self.windowState() | Qt.WindowMaximized)
         self.resize(1400, 850)  # ekran kapsamı yoksa fallback boyutu
 
+        # Kapanmışsa pencereyi çıkış anına kadar uzat + işaretle
+        exit_marker = _lifecycle_exit(store, setup_id)
+        exit_time = exit_marker[0] if exit_marker else None
+
         # 1) DB'den dene
-        klines = _klines_from_db(store, setup)
+        klines = _klines_from_db(store, setup, exit_time=exit_time)
         if klines is None:
             # 2) Yetersiz → MEXC fetch
             self.setWindowTitle(self.windowTitle() + " (MEXC fetch…)")
-            klines = _klines_from_mexc(setup)
+            klines = _klines_from_mexc(setup, exit_time=exit_time)
 
         if not klines or len(klines) < 20:
             QMessageBox.warning(
@@ -120,7 +145,7 @@ class ChartWindow(QDialog):
             return
 
         try:
-            png_bytes = render_setup_chart(setup, klines)
+            png_bytes = render_setup_chart(setup, klines, exit_marker=exit_marker)
         except Exception as e:
             log.exception("Chart render hatası")
             QMessageBox.critical(self, "Hata", f"Grafik üretimi başarısız: {e}")

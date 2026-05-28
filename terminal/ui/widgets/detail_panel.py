@@ -180,7 +180,8 @@ class DetailPanel(QFrame):
         # Lazy import — mplfinance ağır, sadece chart açılırken yükle
         from terminal.ui.widgets.chart_window import ChartWindow
         try:
-            win = ChartWindow(setup, self._provider.store, parent=self)
+            win = ChartWindow(setup, self._provider.store, parent=self,
+                              setup_id=self._current_setup_id)
             if win.isVisible() or win.windowTitle():
                 win.exec()
         except Exception as e:
