@@ -42,6 +42,9 @@ log = logging.getLogger(__name__)
 # gider — kısa vadeli TF gürültüsünü kapatır. DB'ye (UI) tüm TF'ler yazılır.
 POTENTIAL_TG_INTERVALS = {"4h", "1d"}
 
+# HTF verisi yavaş değişir → bu süreden sık yeniden çekme (rate-limit tasarrufu).
+HTF_REFRESH_SECONDS = 120
+
 
 def _fmt(ms: int) -> str:
     return format_local(ms)
@@ -94,6 +97,7 @@ class PairWorker:
         self.tracker: LifecycleTracker | None = None
         self._running = False
         self._htf_cache: list[dict[str, Any]] | None = None
+        self._htf_last_fetch = 0.0  # HTF cache zaman damgası (zaman-cache için)
         self._tag = f"[{symbol} {interval}]"
         # Potansiyel pattern dedup key — (spec_name, x_time, a_time, b_time, c_time)
         self._last_potential_key: tuple | None = None
@@ -257,10 +261,16 @@ class PairWorker:
     def _fetch_htf(self) -> list[dict[str, Any]] | None:
         if self.htf_interval is None or self.client is None:
             return None
+        # HTF verisi yavaş değişir; her bar değil en fazla HTF_REFRESH_SECONDS'ta
+        # bir çek → 250 kombinasyonda istek yükünü ciddi azaltır (rate-limit).
+        now = time.time()
+        if self._htf_cache is not None and (now - self._htf_last_fetch) < HTF_REFRESH_SECONDS:
+            return self._htf_cache
         try:
             self._htf_cache = self.client.klines(self.symbol, self.htf_interval, limit=120)
-        except MexcError as e:
-            log.warning("%s HTF fetch: %s", self._tag, e)
+            self._htf_last_fetch = now
+        except (MexcError, MexcFuturesError) as e:
+            log.warning("%s HTF fetch: %s", self._tag, e)  # eski cache'i koru
         return self._htf_cache
 
     def _fill_pending_entries(self, fill_bar: dict[str, Any]) -> None:
