@@ -1,0 +1,22 @@
+[Unit]
+Description=harmonik paper trade web dashboard (mobil, salt-okunur)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=harmonik
+WorkingDirectory=/home/harmonik/harmonik
+Environment=PYTHONUNBUFFERED=1
+# Şifreyi BURADAN değiştir (WEB_PASS). WEB_USER opsiyonel.
+Environment=WEB_USER=admin
+Environment=WEB_PASS=DEGISTIR_BENI
+Environment=WEB_PORT=8080
+ExecStart=/home/harmonik/harmonik/venv/bin/python -m terminal.web.server --log-level INFO
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/harmonik/web.log
+StandardError=append:/var/log/harmonik/web.err
+
+[Install]
+WantedBy=multi-user.target
