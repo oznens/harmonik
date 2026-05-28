@@ -38,6 +38,10 @@ from terminal.timeutil import format_local
 
 log = logging.getLogger(__name__)
 
+# Potansiyel (henüz oluşmamış) pattern bildirimleri SADECE bu TF'lerde Telegram'a
+# gider — kısa vadeli TF gürültüsünü kapatır. DB'ye (UI) tüm TF'ler yazılır.
+POTENTIAL_TG_INTERVALS = {"4h", "1d"}
+
 
 def _fmt(ms: int) -> str:
     return format_local(ms)
@@ -327,12 +331,10 @@ class PairWorker:
         """Son X-A-B-C uyumlu potansiyel pattern varsa Telegram'a kart yolla.
         Dedup: aynı (pivots, pattern) tekrar gönderilmesin diye key tutuluyor.
         """
-        if self.tg is None or self.no_potential:
+        if self.no_potential:
             return
         from terminal.detection.pivots import find_pivots
         from terminal.detection.potential import find_potential_patterns
-        from terminal.telegram_bot.cards import potential_card
-        from terminal.telegram_bot.charts import render_potential_chart
         pivots = find_pivots(klines, self.threshold)
         if len(pivots) < 4:
             return
@@ -340,11 +342,17 @@ class PairWorker:
         if not matches:
             return
         m = matches[0]
-        # DB'ye yaz (UI'da görünmesi için) — dedup UNIQUE constraint ile
+        # DB'ye yaz (UI Potansiyel sekmesinde TÜM TF'ler görünsün) — dedup
+        # UNIQUE constraint ile
         try:
             self.store.upsert_potential(self.symbol, self.interval, m)
         except Exception as e:
             log.warning("%s potansiyel DB yazma: %s", self._tag, e)
+        # Telegram'a SADECE swing TF'ler (4h, 1d) — kısa TF gürültüsü kapalı.
+        if self.tg is None or self.interval not in POTENTIAL_TG_INTERVALS:
+            return
+        from terminal.telegram_bot.cards import potential_card
+        from terminal.telegram_bot.charts import render_potential_chart
         key = (m.spec.name, m.x.time, m.a.time, m.b.time, m.c.time)
         if key == self._last_potential_key:
             return  # zaten gönderildi
@@ -540,6 +548,12 @@ def main(argv: list[str] | None = None) -> int:
             shared_store, initial_equity=args.paper_equity,
             risk_per_trade=args.paper_risk,
         )
+        # Açılışta: lifecycle terminal olduğu halde açık kalmış paper trade'leri
+        # kapat (stop değdi ama paper açık kaldıysa düzeltir).
+        synced = paper_engine.sync_closed_from_lifecycle()
+        if synced:
+            log.info("PAPER SYNC: %d açık trade lifecycle ile uyumlandı (kapatıldı)",
+                     len(synced))
         summary = paper_engine.summary()
         log.info("PAPER TRADE: başlangıç=$%.0f, mevcut=$%.2f, toplam_trade=%d, WR=%.1f%%",
                  summary["initial_equity"], summary["current_equity"],

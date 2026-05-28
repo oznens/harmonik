@@ -21,10 +21,17 @@ class Store:
 
     def __init__(self, path: Path | str = DB_PATH) -> None:
         self.path = Path(path)
-        self._conn = sqlite3.connect(self.path, isolation_level=None)  # autocommit
+        # check_same_thread=False: paper engine gibi paylaşılan Store'lar farklı
+        # worker thread'lerinden çağrılabilsin. Eşzamanlı erişimi serileştirmek
+        # ÇAĞIRANIN sorumluluğundadır (bkz. PaperEngine._lock). Per-thread
+        # store'lar yine tek thread'de kullanılır → etkilenmez.
+        self._conn = sqlite3.connect(
+            self.path, isolation_level=None, check_same_thread=False)  # autocommit
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA synchronous = NORMAL")
+        # Eşzamanlı yazıcılarda "database is locked" yerine 5sn bekle.
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._init_schema()
 
     def _init_schema(self) -> None:
