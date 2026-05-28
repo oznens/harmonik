@@ -19,7 +19,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from terminal.config import BUFFER_SIZE
-from terminal.data.mexc_client import MexcClient
+from terminal.data.mexc_futures import MexcFuturesClient
 from terminal.db.store import Store
 from terminal.ui import chart_data
 
@@ -28,8 +28,8 @@ log = logging.getLogger(__name__)
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
 _HTML = _ASSETS / "chart.html"
 
-LIVE_INTERVAL_MS = 2000      # canlı mum yoklama sıklığı (2sn — daha akıcı fiyat)
-FULL_REBUILD_EVERY = 15      # her N canlı tikte overlay tam yenile (15×2sn≈30sn)
+LIVE_INTERVAL_MS = 1000      # canlı mum yoklama sıklığı (1sn — neredeyse anlık)
+FULL_REBUILD_EVERY = 30      # her N canlı tikte overlay tam yenile (30×1sn≈30sn)
 
 
 class ChartBridge(QObject):
@@ -86,7 +86,7 @@ class LiveChartTab(QWidget):
         self.store = store
         self._pool = QThreadPool.globalInstance()
         self._tasks: set[_Task] = set()
-        self._client: MexcClient | None = None
+        self._client: MexcFuturesClient | None = None
         self._fetching_live = False
         self._loading_full = False
         self._tick = 0
@@ -118,9 +118,10 @@ class LiveChartTab(QWidget):
 
     # ---- altyapı ----
 
-    def _get_client(self) -> MexcClient:
+    def _get_client(self) -> MexcFuturesClient:
+        # Futures fiyatı — setup'lar/paper de futures olduğu için birebir uysun.
         if self._client is None:
-            self._client = MexcClient()
+            self._client = MexcFuturesClient()
         return self._client
 
     def _run(self, fn, on_done, on_fail=None) -> None:
