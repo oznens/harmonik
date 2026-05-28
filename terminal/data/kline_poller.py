@@ -59,10 +59,28 @@ class KlinePoller:
         self._tag = f"[{symbol} {interval}]"
 
     def bootstrap(self) -> None:
-        """Son N kapanmış mumu çek, tampona ve DB'ye yaz."""
+        """Son N kapanmış mumu çek, tampona ve DB'ye yaz.
+
+        Rate-limit (510) açılışta sık olabildiğinden geri-çekilmeli (backoff)
+        denenir. Tüm denemeler başarısızsa worker ÖLMEZ — poll döngüsü tamponu
+        zamanla doldurur.
+        """
         log.info("%s bootstrap: son %d mum alınıyor", self._tag, self._buffer_size)
         # Sona düşen, oluşmakta olan mumu kaçırmamak için bir fazla iste
-        klines = self.client.klines(self.symbol, self.interval, limit=self._buffer_size + 1)
+        klines = None
+        for attempt in range(1, 6):
+            try:
+                klines = self.client.klines(
+                    self.symbol, self.interval, limit=self._buffer_size + 1)
+                break
+            except Exception as e:
+                wait = min(30, 2 ** attempt)
+                log.warning("%s bootstrap denemesi %d başarısız (%s) — %ss bekle",
+                            self._tag, attempt, e, wait)
+                time.sleep(wait)
+        if klines is None:
+            log.error("%s bootstrap başarısız — worker poll döngüsüne geçiyor", self._tag)
+            return
         closed = [k for k in klines if self._is_closed(k)]
         if not closed:
             log.warning("%s bootstrap'ta kapanmış mum yok", self._tag)

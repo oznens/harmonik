@@ -15,6 +15,8 @@ Bu istemci spot MexcClient ile aynı interface'i sunar:
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 from typing import Any
 
@@ -25,6 +27,12 @@ from terminal.config import HTTP_TIMEOUT
 log = logging.getLogger(__name__)
 
 MEXC_FUTURES_BASE = "https://contract.mexc.com"
+
+# GLOBAL hız sınırı: tüm MexcFuturesClient örnekleri (250 worker thread) tek bir
+# sayaçtan geçer → toplam istek hızı sınırlanır, MEXC 510 (too frequent) önlenir.
+# İstekler arası min boşluk (sn). .env'de MEXC_FUTURES_MIN_INTERVAL ile ayarlanır.
+# 0.10 ≈ 10 istek/sn. 510 hâlâ gelirse bu değeri artır (0.15, 0.2 ...).
+_MIN_REQUEST_INTERVAL = float(os.environ.get("MEXC_FUTURES_MIN_INTERVAL", "0.10"))
 
 # Futures'ta tek istek başına max bar (deneyimle ayarlandı, MEXC docs net belirtmez)
 MAX_KLINE_LIMIT = 2000
@@ -62,12 +70,26 @@ class MexcFuturesError(Exception):
 class MexcFuturesClient:
     """Sync futures REST istemcisi. MexcClient (spot) ile aynı interface."""
 
+    # Tüm örnekler arası paylaşılan global hız sınırı (sınıf seviyesi).
+    _rate_lock = threading.Lock()
+    _last_request_ts = 0.0
+
     def __init__(self, base_url: str = MEXC_FUTURES_BASE,
                  timeout: float = HTTP_TIMEOUT) -> None:
         self._client = httpx.Client(
             base_url=base_url, timeout=timeout,
             headers={"User-Agent": "harmonik/1.0 (paper-trade)"},
         )
+
+    @classmethod
+    def _throttle(cls) -> None:
+        """Global istek aralığını uygula — tüm worker'lar burada serileşir."""
+        with cls._rate_lock:
+            now = time.monotonic()
+            wait = _MIN_REQUEST_INTERVAL - (now - cls._last_request_ts)
+            if wait > 0:
+                time.sleep(wait)
+            cls._last_request_ts = time.monotonic()
 
     def klines(self, symbol: str, interval: str,
                limit: int = 200) -> list[dict[str, Any]]:
@@ -84,6 +106,7 @@ class MexcFuturesClient:
         sec_per_bar = _INTERVAL_SECONDS.get(interval, 3600)
         end_s = int(time.time())
         start_s = end_s - limit * sec_per_bar
+        self._throttle()
         try:
             r = self._client.get(
                 f"/api/v1/contract/kline/{fut_symbol}",
@@ -146,6 +169,7 @@ class MexcFuturesClient:
             remaining = total_bars - len(collected)
             limit = min(MAX_KLINE_LIMIT, remaining)
             start_s = end_s - limit * sec_per_bar
+            self._throttle()
             try:
                 r = self._client.get(
                     f"/api/v1/contract/kline/{fut_symbol}",
@@ -181,6 +205,7 @@ class MexcFuturesClient:
         (`amount24` = 24s USDT cirosu, `volume24` = kontrat adedi). Hacme göre
         parite sıralamak için kullanılır.
         """
+        self._throttle()
         r = self._client.get("/api/v1/contract/ticker")
         r.raise_for_status()
         data = r.json()
