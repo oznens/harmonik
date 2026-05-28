@@ -56,6 +56,7 @@ def run_lab(
     total_combos = len(symbols) * len(intervals)
     combo_idx = 0
     total_samples = 0
+    portfolio_trades: list[dict[str, Any]] = []  # canlı-kural portföy simülasyonu için
 
     for symbol in symbols:
         for interval in intervals:
@@ -151,11 +152,34 @@ def run_lab(
                 store.add_karakter_sample(run_id, s, outcome)
                 total_samples += 1
 
+                # Portföy simülasyonu için trade kaydı (elenen hariç — canlıda
+                # elenen setup lifecycle'a/paper'a girmez).
+                if not s.elenen and outcome.entered_price is not None:
+                    portfolio_trades.append({
+                        "symbol": s.symbol, "interval": s.interval,
+                        "pattern": s.pattern_name, "direction": s.direction,
+                        "ideal_entry": s.entry, "stop": s.stop, "tp1": s.tp1,
+                        "fill": outcome.entered_price,
+                        "open_time": outcome.entered_time,
+                        "close_time": outcome.exited_time,
+                        "outcome": outcome.outcome,
+                    })
+
             if progress:
                 progress(f"{tag} — tamam.")
 
     store.finish_karakter_run(run_id, total_samples)
     store.recompute_karakter_scores()
+
+    # Canlı kurallarla portföy P&L simülasyonu
     if progress:
+        try:
+            from terminal.karakter.portfolio import (
+                format_portfolio_summary, simulate_portfolio,
+            )
+            result = simulate_portfolio(portfolio_trades)
+            progress(format_portfolio_summary(result))
+        except Exception as e:  # özet başarısız olsa da lab sonucu kaybolmasın
+            log.warning("portföy simülasyonu hatası: %s", e)
         progress(f"Lab tamamlandı: {total_samples} örneklem, run_id={run_id}")
     return run_id
