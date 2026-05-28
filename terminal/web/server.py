@@ -15,19 +15,30 @@ from __future__ import annotations
 import argparse
 import base64
 import html as html_mod
+import json
 import logging
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from terminal.config import DB_PATH
 
 log = logging.getLogger(__name__)
 
 TZ = timezone(timedelta(hours=3))  # IST — UI ile tutarlı
+
+_INTERVAL_MS = {
+    "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+    "60m": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "1W": 604_800_000,
+}
+
+# matplotlib/mplfinance global state thread-safe değil → grafik render serileştir.
+_CHART_LOCK = threading.Lock()
 
 
 def _fmt_ts(ms: int | None) -> str:
@@ -106,6 +117,119 @@ def _connect_ro(db_path) -> sqlite3.Connection:
     return conn
 
 
+def _load_setup_ro(conn: sqlite3.Connection, setup_id: int):
+    """Setup'ı salt-okunur bağlantıdan yükle (Store.load_setup'ın read-only kopyası;
+    Store import edip şema yazımı tetiklememek + PySide6 çekmemek için)."""
+    from terminal.detection.models import Setup
+    from terminal.detection.pivots import Pivot
+
+    row = conn.execute("SELECT * FROM setups WHERE id = ?", (setup_id,)).fetchone()
+    if row is None:
+        return None
+    d = row["direction"]
+    return Setup(
+        symbol=row["symbol"], interval=row["interval"],
+        pattern_name=row["pattern_name"], direction=d,
+        pivots={
+            "X": Pivot(0, row["x_time"], row["x_price"], "low" if d == "bull" else "high"),
+            "A": Pivot(0, row["a_time"], row["a_price"], "high" if d == "bull" else "low"),
+            "B": Pivot(0, row["b_time"], row["b_price"], "low" if d == "bull" else "high"),
+            "C": Pivot(0, row["c_time"], row["c_price"], "high" if d == "bull" else "low"),
+            "D": Pivot(0, row["d_time"], row["d_price"], "low" if d == "bull" else "high"),
+        },
+        b_ratio=row["b_ratio"], c_ratio=row["c_ratio"], d_ratio=row["d_ratio"],
+        bc_proj=row["bc_proj"], cd_ab_ratio=row["cd_ab_ratio"],
+        ab_cd_equivalent=bool(row["ab_cd_equivalent"]),
+        prz_low=row["prz_low"], prz_high=row["prz_high"],
+        prz_components=json.loads(row["prz_components"]),
+        entry=row["entry"], stop=row["stop"], tp1=row["tp1"], tp2=row["tp2"],
+        detected_at=row["detected_at"],
+        q_score=row["q_score"] or 0, q_category=row["q_category"] or "",
+        htf_interval=row["htf_interval"], htf_trend=row["htf_trend"],
+        elenen=bool(row["elenen"]),
+    )
+
+
+def _klines_for_setup(conn: sqlite3.Connection, setup,
+                      pad_before: int = 10, pad_after: int = 30) -> list | None:
+    """Setup penceresindeki mumları DB'den getir (X-öncesi → D-sonrası)."""
+    ms = _INTERVAL_MS.get(setup.interval, 3_600_000)
+    start_t = setup.pivots["X"].time - pad_before * ms
+    end_t = setup.pivots["D"].time + pad_after * ms
+    rows = conn.execute(
+        "SELECT open_time, close_time, open, high, low, close, volume, quote_volume "
+        "FROM klines WHERE symbol = ? AND interval = ? "
+        "AND open_time >= ? AND open_time <= ? ORDER BY open_time",
+        (setup.symbol, setup.interval, start_t, end_t),
+    ).fetchall()
+    if not rows:
+        return None
+    return [
+        {"open_time": r[0], "close_time": r[1], "open": r[2], "high": r[3],
+         "low": r[4], "close": r[5], "volume": r[6], "quote_volume": r[7]}
+        for r in rows
+    ]
+
+
+def render_chart_png(db_path, setup_id: int) -> bytes | None:
+    """Setup grafiğini PNG olarak üret. Veri yetersizse None."""
+    try:
+        conn = _connect_ro(db_path)
+    except sqlite3.Error:
+        return None
+    try:
+        setup = _load_setup_ro(conn, setup_id)
+        if setup is None:
+            return None
+        klines = _klines_for_setup(conn, setup)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if not klines or len(klines) < 5:
+        return None
+    from terminal.telegram_bot.charts import render_setup_chart  # lazy: matplotlib ağır
+    with _CHART_LOCK:
+        return render_setup_chart(setup, klines)
+
+
+def chart_page(db_path, setup_id: int) -> str:
+    """Grafiği gömen küçük HTML sayfası (geri linki + başlık). Auto-refresh yok."""
+    title = f"Setup #{setup_id}"
+    try:
+        conn = _connect_ro(db_path)
+        try:
+            row = conn.execute(
+                "SELECT symbol, interval, pattern_name, direction FROM setups WHERE id = ?",
+                (setup_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row:
+            arrow = "▲" if row["direction"] == "bull" else "▼"
+            title = f'{row["symbol"]} {row["interval"]} · {row["pattern_name"]} {arrow}'
+    except sqlite3.Error:
+        pass
+    return f"""<!doctype html>
+<html lang="tr"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_e(title)}</title>
+<style>{STYLE}
+  .imgwrap {{ border:1px solid #2a2a32; border-radius:8px; overflow:hidden; background:#fff; }}
+  .imgwrap img {{ display:block; width:100%; height:auto; }}
+  a.back {{ display:inline-block; margin:8px 0 12px; color:#42a5f5; text-decoration:none;
+           font-weight:600; }}
+</style></head>
+<body><div class="wrap">
+  <a class="back" href="/">← Geri</a>
+  <h1>{_e(title)}</h1>
+  <div class="imgwrap"><img src="/chart.png?id={setup_id}" alt="grafik"
+       onerror="this.parentNode.innerHTML='<div class=empty>Grafik için yeterli mum verisi yok.</div>'"></div>
+</div></body></html>"""
+
+
 def render_dashboard(db_path, refresh: int) -> str:
     initial = equity = 1000.0
     total_pnl = pnl_pct = 0.0
@@ -121,13 +245,13 @@ def render_dashboard(db_path, refresh: int) -> str:
                 "stop_count, total_pnl FROM paper_account WHERE id = 1"
             ).fetchone()
             open_raw = conn.execute(
-                "SELECT symbol, interval, pattern, direction, entry_price, stop_price, "
-                "tp1_price, position_usd, leverage, opened_at FROM paper_trades "
+                "SELECT setup_id, symbol, interval, pattern, direction, entry_price, "
+                "stop_price, tp1_price, position_usd, leverage, opened_at FROM paper_trades "
                 "WHERE closed_at IS NULL ORDER BY opened_at DESC"
             ).fetchall()
             closed_raw = conn.execute(
-                "SELECT symbol, interval, pattern, direction, entry_price, stop_price, "
-                "tp1_price, exit_price, outcome, pnl_usd, leverage, closed_at "
+                "SELECT setup_id, symbol, interval, pattern, direction, entry_price, "
+                "stop_price, tp1_price, exit_price, outcome, pnl_usd, leverage, closed_at "
                 "FROM paper_trades WHERE closed_at IS NOT NULL "
                 "ORDER BY closed_at DESC LIMIT 50"
             ).fetchall()
@@ -197,6 +321,12 @@ def _rr_cls(rr: float) -> str:
     return "g" if rr >= 1.5 else "r" if rr < 1.0 else "d"
 
 
+def _sym_link(setup_id, symbol) -> str:
+    """Parite hücresi → setup grafiği linki."""
+    return (f'<a href="/chart?id={int(setup_id)}" '
+            f'style="color:#42a5f5;text-decoration:none;font-weight:600">{_e(symbol)} ›</a>')
+
+
 def _open_table(rows: list) -> str:
     if not rows:
         return '<div class="empty">Açık pozisyon yok.</div>'
@@ -210,7 +340,8 @@ def _open_table(rows: list) -> str:
         dir_txt, dir_cls = _dir(r["direction"])
         rr = _rr(r["entry_price"], r["stop_price"], r["tp1_price"])
         body.append(
-            f'<tr><td class="l">{_e(r["symbol"])}</td><td>{_e(r["interval"])}</td>'
+            f'<tr><td class="l">{_sym_link(r["setup_id"], r["symbol"])}</td>'
+            f'<td>{_e(r["interval"])}</td>'
             f'<td class="l">{_e(r["pattern"])}</td>'
             f'<td class="{dir_cls}">{dir_txt}</td>'
             f'<td>{_fmt_price(r["entry_price"])}</td><td>{_fmt_price(r["stop_price"])}</td>'
@@ -240,7 +371,8 @@ def _closed_table(rows: list) -> str:
         out_cls = {"TP": "g", "STOP": "r"}.get(r["outcome"], "d")
         pnl_cls = "g" if pnl > 0 else "r" if pnl < 0 else "d"
         body.append(
-            f'<tr><td class="l">{_e(r["symbol"])}</td><td>{_e(r["interval"])}</td>'
+            f'<tr><td class="l">{_sym_link(r["setup_id"], r["symbol"])}</td>'
+            f'<td>{_e(r["interval"])}</td>'
             f'<td class="l">{_e(r["pattern"])}</td>'
             f'<td class="{dir_cls}">{dir_txt}</td>'
             f'<td>{_fmt_price(r["entry_price"])}</td>'
@@ -271,6 +403,20 @@ def make_handler(db_path, user: str, password: str, refresh: int):
             self.end_headers()
             self.wfile.write("Yetki gerekli.".encode("utf-8"))
 
+        def _send(self, code: int, body: bytes, ctype: str) -> None:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _setup_id_param(self, qs: dict) -> int | None:
+            try:
+                return int(qs.get("id", [""])[0])
+            except (ValueError, TypeError):
+                return None
+
         def do_GET(self) -> None:  # noqa: N802
             if self.path == "/favicon.ico":
                 self.send_response(204)
@@ -279,23 +425,35 @@ def make_handler(db_path, user: str, password: str, refresh: int):
             if not self._auth_ok():
                 self._deny()
                 return
-            if self.path not in ("/", "/index.html"):
-                self.send_response(404)
-                self.end_headers()
-                return
+            parsed = urlparse(self.path)
+            path = parsed.path
+            qs = parse_qs(parsed.query)
             try:
-                body = render_dashboard(db_path, refresh).encode("utf-8")
+                if path in ("/", "/index.html"):
+                    self._send(200, render_dashboard(db_path, refresh).encode("utf-8"),
+                               "text/html; charset=utf-8")
+                elif path == "/chart":
+                    sid = self._setup_id_param(qs)
+                    if sid is None:
+                        self._send(400, b"id gerekli", "text/plain; charset=utf-8")
+                        return
+                    self._send(200, chart_page(db_path, sid).encode("utf-8"),
+                               "text/html; charset=utf-8")
+                elif path == "/chart.png":
+                    sid = self._setup_id_param(qs)
+                    png = render_chart_png(db_path, sid) if sid is not None else None
+                    if png is None:
+                        self.send_response(404)
+                        self.end_headers()
+                        return
+                    self._send(200, png, "image/png")
+                else:
+                    self.send_response(404)
+                    self.end_headers()
             except Exception:
-                log.exception("dashboard render hatası")
+                log.exception("istek hatası: %s", self.path)
                 self.send_response(500)
                 self.end_headers()
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
 
         def log_message(self, fmt, *args) -> None:
             log.debug("%s - %s", self.address_string(), fmt % args)
