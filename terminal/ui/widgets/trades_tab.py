@@ -14,8 +14,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QPushButton, QTableView, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QTableView, QVBoxLayout, QWidget,
 )
+
+SETUP_ID_ROLE = Qt.UserRole + 1
 
 from terminal.db.store import Store
 
@@ -119,12 +121,16 @@ class TradesTab(QWidget):
             "Parite", "TF", "Pattern", "Yön", "Entry", "Stop", "TP1",
             "Pozisyon", "Lev", "Risk", "Açıldı", "Yaş",
         ])
+        self.open_table.doubleClicked.connect(
+            lambda idx: self._open_chart(self.open_table, idx))
 
         # --- KAPANAN TRADELER ---
         self.closed_table = self._make_table([
             "Parite", "TF", "Pattern", "Yön", "Entry", "Exit",
             "Outcome", "P&L", "Lev", "Kapandı",
         ])
+        self.closed_table.doubleClicked.connect(
+            lambda idx: self._open_chart(self.closed_table, idx))
 
         # Ana layout
         layout = QVBoxLayout(self)
@@ -134,13 +140,13 @@ class TradesTab(QWidget):
         layout.addLayout(cards_row)
 
         # Açık pozisyonlar başlık + tablo
-        open_lbl = QLabel("🟢 Açık Pozisyonlar")
+        open_lbl = QLabel("🟢 Açık Pozisyonlar  ·  satıra çift tıkla → grafik")
         open_lbl.setStyleSheet("color: #42a5f5; font-weight: bold; padding-top: 4px;")
         layout.addWidget(open_lbl)
         layout.addWidget(self.open_table, 1)
 
         # Kapanan trades başlık + tablo
-        closed_lbl = QLabel("📋 Son Kapanan Tradeler (50)")
+        closed_lbl = QLabel("📋 Son Kapanan Tradeler (50)  ·  satıra çift tıkla → grafik")
         closed_lbl.setStyleSheet("color: #888; font-weight: bold; padding-top: 4px;")
         layout.addWidget(closed_lbl)
         layout.addWidget(self.closed_table, 1)
@@ -208,7 +214,7 @@ class TradesTab(QWidget):
         cur = self.store._conn.execute(
             """SELECT symbol, interval, pattern, direction,
                       entry_price, stop_price, tp1_price,
-                      position_usd, leverage, risk_usd, opened_at
+                      position_usd, leverage, risk_usd, opened_at, setup_id
                FROM paper_trades
                WHERE closed_at IS NULL
                ORDER BY opened_at DESC"""
@@ -219,7 +225,7 @@ class TradesTab(QWidget):
         model.removeRows(0, model.rowCount())
         for r in rows:
             (sym, ivl, pat, dirn, entry, stop, tp1,
-             pos, lev, risk, opened) = r
+             pos, lev, risk, opened, setup_id) = r
             dir_txt = "BULL ▲" if dirn == "bull" else "BEAR ▼"
             cells = [
                 (sym, sym),
@@ -240,6 +246,7 @@ class TradesTab(QWidget):
                 it = QStandardItem(txt)
                 it.setData(sort_val, Qt.UserRole)
                 items_row.append(it)
+            items_row[0].setData(setup_id, SETUP_ID_ROLE)
             # Yön rengi
             items_row[3].setForeground(QColor(GREEN if dirn == "bull" else RED))
             items_row[11].setForeground(QColor(TEXT_DIM))
@@ -251,7 +258,7 @@ class TradesTab(QWidget):
         cur = self.store._conn.execute(
             """SELECT symbol, interval, pattern, direction,
                       entry_price, exit_price, outcome, pnl_usd,
-                      leverage, closed_at
+                      leverage, closed_at, setup_id
                FROM paper_trades
                WHERE closed_at IS NOT NULL
                ORDER BY closed_at DESC
@@ -263,7 +270,7 @@ class TradesTab(QWidget):
         model.removeRows(0, model.rowCount())
         for r in rows:
             (sym, ivl, pat, dirn, entry, exitp, outcome, pnl,
-             lev, closed) = r
+             lev, closed, setup_id) = r
             pnl = pnl or 0
             dir_txt = "BULL ▲" if dirn == "bull" else "BEAR ▼"
             outcome_color = {
@@ -286,12 +293,32 @@ class TradesTab(QWidget):
                 it = QStandardItem(txt)
                 it.setData(sort_val, Qt.UserRole)
                 items_row.append(it)
+            items_row[0].setData(setup_id, SETUP_ID_ROLE)
             items_row[3].setForeground(QColor(GREEN if dirn == "bull" else RED))
             items_row[6].setForeground(QColor(outcome_color))
             pnl_color = GREEN if pnl > 0 else (RED if pnl < 0 else TEXT_DIM)
             items_row[7].setForeground(QColor(pnl_color))
             model.appendRow(items_row)
         self.closed_table.setSortingEnabled(True)
+
+    def _open_chart(self, table: QTableView, index) -> None:
+        item = table.model().item(index.row(), 0)
+        if item is None:
+            return
+        setup_id = item.data(SETUP_ID_ROLE)
+        if setup_id is None:
+            return
+        setup = self.store.load_setup(int(setup_id))
+        if setup is None:
+            QMessageBox.warning(self, "Hata", "Setup yüklenemedi.")
+            return
+        from terminal.ui.widgets.chart_window import ChartWindow
+        try:
+            win = ChartWindow(setup, self.store, parent=self)
+            win.exec()
+        except Exception as e:
+            log.exception("Tradeler chart açma hatası")
+            QMessageBox.critical(self, "Hata", f"Grafik açılamadı: {e}")
 
     def _force_refresh(self) -> None:
         mw = self.window()
