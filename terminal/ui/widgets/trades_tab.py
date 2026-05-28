@@ -58,6 +58,12 @@ def _fmt_price(p: float | None) -> str:
     return f"{p:.6g}"
 
 
+def _rr(entry: float, stop: float, tp1: float) -> float:
+    """Gerçek dolum fiyatına göre risk:ödül oranı = |TP1−fill| / |fill−Stop|."""
+    risk = abs(entry - stop)
+    return abs(tp1 - entry) / risk if risk else 0.0
+
+
 def _stat_card(label: str, value: str, color: str | None = None) -> tuple[QFrame, QLabel]:
     box = QFrame()
     box.setObjectName("StatCard")
@@ -118,7 +124,7 @@ class TradesTab(QWidget):
 
         # --- AÇIK POZİSYONLAR ---
         self.open_table = self._make_table([
-            "Parite", "TF", "Pattern", "Yön", "Entry", "Stop", "TP1",
+            "Parite", "TF", "Pattern", "Yön", "Entry", "Stop", "TP1", "R:R",
             "Pozisyon", "Lev", "Risk", "Açıldı", "Yaş",
         ])
         self.open_table.doubleClicked.connect(
@@ -126,7 +132,7 @@ class TradesTab(QWidget):
 
         # --- KAPANAN TRADELER ---
         self.closed_table = self._make_table([
-            "Parite", "TF", "Pattern", "Yön", "Entry", "Exit",
+            "Parite", "TF", "Pattern", "Yön", "Entry", "R:R", "Exit",
             "Outcome", "P&L", "Lev", "Kapandı",
         ])
         self.closed_table.doubleClicked.connect(
@@ -227,6 +233,7 @@ class TradesTab(QWidget):
             (sym, ivl, pat, dirn, entry, stop, tp1,
              pos, lev, risk, opened, setup_id) = r
             dir_txt = "BULL ▲" if dirn == "bull" else "BEAR ▼"
+            rr = _rr(entry, stop, tp1)
             cells = [
                 (sym, sym),
                 (ivl, ivl),
@@ -235,6 +242,7 @@ class TradesTab(QWidget):
                 (_fmt_price(entry), entry),
                 (_fmt_price(stop), stop),
                 (_fmt_price(tp1), tp1),
+                (f"{rr:.2f}", rr),
                 (f"${pos:.0f}", pos),
                 (f"{lev:.0f}x", lev),
                 (f"${risk:.0f}", risk),
@@ -247,9 +255,11 @@ class TradesTab(QWidget):
                 it.setData(sort_val, Qt.UserRole)
                 items_row.append(it)
             items_row[0].setData(setup_id, SETUP_ID_ROLE)
-            # Yön rengi
+            # Yön rengi + R:R rengi (>=1.5 yeşil, <1 kırmızı)
             items_row[3].setForeground(QColor(GREEN if dirn == "bull" else RED))
-            items_row[11].setForeground(QColor(TEXT_DIM))
+            rr_color = GREEN if rr >= 1.5 else (RED if rr < 1.0 else TEXT_DIM)
+            items_row[7].setForeground(QColor(rr_color))
+            items_row[12].setForeground(QColor(TEXT_DIM))
             model.appendRow(items_row)
         self.open_table.setSortingEnabled(True)
 
@@ -258,7 +268,7 @@ class TradesTab(QWidget):
         cur = self.store._conn.execute(
             """SELECT symbol, interval, pattern, direction,
                       entry_price, exit_price, outcome, pnl_usd,
-                      leverage, closed_at, setup_id
+                      leverage, closed_at, setup_id, stop_price, tp1_price
                FROM paper_trades
                WHERE closed_at IS NOT NULL
                ORDER BY closed_at DESC
@@ -270,9 +280,10 @@ class TradesTab(QWidget):
         model.removeRows(0, model.rowCount())
         for r in rows:
             (sym, ivl, pat, dirn, entry, exitp, outcome, pnl,
-             lev, closed, setup_id) = r
+             lev, closed, setup_id, stop, tp1) = r
             pnl = pnl or 0
             dir_txt = "BULL ▲" if dirn == "bull" else "BEAR ▼"
+            rr = _rr(entry, stop, tp1)
             outcome_color = {
                 "TP": GREEN, "STOP": RED, "EO": TEXT_DIM, "ZI": TEXT_DIM,
             }.get(outcome, TEXT_DIM)
@@ -282,6 +293,7 @@ class TradesTab(QWidget):
                 (pat, pat),
                 (dir_txt, dirn),
                 (_fmt_price(entry), entry),
+                (f"{rr:.2f}", rr),
                 (_fmt_price(exitp), exitp or 0),
                 (outcome or "—", outcome or ""),
                 (f"{'+' if pnl >= 0 else ''}${pnl:.2f}", pnl),
@@ -295,9 +307,11 @@ class TradesTab(QWidget):
                 items_row.append(it)
             items_row[0].setData(setup_id, SETUP_ID_ROLE)
             items_row[3].setForeground(QColor(GREEN if dirn == "bull" else RED))
-            items_row[6].setForeground(QColor(outcome_color))
+            rr_color = GREEN if rr >= 1.5 else (RED if rr < 1.0 else TEXT_DIM)
+            items_row[5].setForeground(QColor(rr_color))
+            items_row[7].setForeground(QColor(outcome_color))
             pnl_color = GREEN if pnl > 0 else (RED if pnl < 0 else TEXT_DIM)
-            items_row[7].setForeground(QColor(pnl_color))
+            items_row[8].setForeground(QColor(pnl_color))
             model.appendRow(items_row)
         self.closed_table.setSortingEnabled(True)
 
