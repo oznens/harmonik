@@ -150,12 +150,34 @@ def _load_setup_ro(conn: sqlite3.Connection, setup_id: int):
     )
 
 
-def _klines_for_setup(conn: sqlite3.Connection, setup,
-                      pad_before: int = 10, pad_after: int = 30) -> list | None:
-    """Setup penceresindeki mumları DB'den getir (X-öncesi → D-sonrası)."""
+def _lifecycle_exit(conn: sqlite3.Connection, setup_id: int) -> tuple[int, str] | None:
+    """Kapanmış setup için (exit_time_ms, outcome). Açıksa None."""
+    try:
+        row = conn.execute(
+            "SELECT state, exited_at FROM setup_lifecycle WHERE setup_id = ?",
+            (setup_id,),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if row and row["state"] in ("TP", "STOP", "ZI", "EO") and row["exited_at"]:
+        return int(row["exited_at"]), row["state"]
+    return None
+
+
+def _klines_for_setup(conn: sqlite3.Connection, setup, exit_time: int | None = None,
+                      pad_before: int = 10, pad_after: int = 30,
+                      pad_after_exit: int = 8) -> list | None:
+    """Setup penceresindeki mumları DB'den getir.
+
+    Kapanmış trade'de (exit_time verilmiş) pencere ÇIKIŞ anına kadar uzar
+    (X-öncesi → çıkış+pad); aksi halde D-sonrası sabit pencere.
+    """
     ms = _INTERVAL_MS.get(setup.interval, 3_600_000)
     start_t = setup.pivots["X"].time - pad_before * ms
-    end_t = setup.pivots["D"].time + pad_after * ms
+    if exit_time is not None:
+        end_t = exit_time + pad_after_exit * ms
+    else:
+        end_t = setup.pivots["D"].time + pad_after * ms
     rows = conn.execute(
         "SELECT open_time, close_time, open, high, low, close, volume, quote_volume "
         "FROM klines WHERE symbol = ? AND interval = ? "
@@ -181,7 +203,9 @@ def render_chart_png(db_path, setup_id: int) -> bytes | None:
         setup = _load_setup_ro(conn, setup_id)
         if setup is None:
             return None
-        klines = _klines_for_setup(conn, setup)
+        exit_marker = _lifecycle_exit(conn, setup_id)
+        exit_time = exit_marker[0] if exit_marker else None
+        klines = _klines_for_setup(conn, setup, exit_time=exit_time)
     finally:
         try:
             conn.close()
@@ -191,7 +215,7 @@ def render_chart_png(db_path, setup_id: int) -> bytes | None:
         return None
     from terminal.telegram_bot.charts import render_setup_chart  # lazy: matplotlib ağır
     with _CHART_LOCK:
-        return render_setup_chart(setup, klines)
+        return render_setup_chart(setup, klines, exit_marker=exit_marker)
 
 
 def chart_page(db_path, setup_id: int) -> str:

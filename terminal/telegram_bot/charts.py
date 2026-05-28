@@ -49,8 +49,13 @@ def _klines_to_df(klines: list[dict[str, Any]]) -> pd.DataFrame:
     return df[["Open", "High", "Low", "Close", "Volume"]]
 
 
-def render_setup_chart(setup: Setup, klines: list[dict[str, Any]]) -> bytes:
-    """Açık temalı setup chart'ı: X-A-B-C-D etiketli + XABCD üçgenleri + PRZ kutusu."""
+def render_setup_chart(setup: Setup, klines: list[dict[str, Any]],
+                       exit_marker: tuple[int, str] | None = None) -> bytes:
+    """Açık temalı setup chart'ı: X-A-B-C-D etiketli + XABCD üçgenleri + PRZ kutusu.
+
+    exit_marker: kapanmış trade için (exit_time_ms, outcome) — TP/STOP/ZI/EO anını
+        dikey çizgi + işaretle gösterir. None ise (canlı/aday) çizilmez.
+    """
     # Zoom: X pivot'undan 10 bar önce → dataset sonu (pattern görünür olsun)
     df_full = _klines_to_df(klines)
     x_t = pd.to_datetime(setup.pivots["X"].time, unit="ms", utc=True)
@@ -195,7 +200,27 @@ def render_setup_chart(setup: Setup, klines: list[dict[str, Any]]) -> bytes:
             clip_on=False,
         )
 
-    # 6) Başlık (üstte koyu band)
+    # 6) Çıkış işareti — kapanmış trade'in TP/STOP/ZI/EO ANI
+    if exit_marker is not None:
+        ex_time_ms, ex_outcome = exit_marker
+        ex_t = pd.to_datetime(ex_time_ms, unit="ms", utc=True)
+        if ex_t in df.index:
+            ex_idx = df.index.get_loc(ex_t)
+            ex_color = {"TP": TP_COLOR, "STOP": SL_COLOR}.get(ex_outcome, "#888888")
+            ax.axvline(ex_idx, color=ex_color, linewidth=1.4, alpha=0.85, zorder=6)
+            ex_price = {"TP": setup.tp1, "STOP": setup.stop}.get(ex_outcome)
+            if ex_price is not None:
+                ax.scatter([ex_idx], [ex_price], s=160, marker="X", color=ex_color,
+                           edgecolor="#000000", linewidth=0.9, zorder=21)
+            label = {"TP": "TP ✓", "STOP": "STOP ✗",
+                     "ZI": "ZAMANSAL İPTAL", "EO": "ENTRY OLMADI"}.get(ex_outcome, ex_outcome)
+            ax.text(ex_idx, df["High"].max(), f" {label} ",
+                    ha="center", va="bottom", fontsize=10, fontweight="bold",
+                    color="#ffffff", zorder=22, clip_on=False,
+                    bbox=dict(boxstyle="round,pad=0.25", facecolor=ex_color,
+                              edgecolor="none", alpha=0.95))
+
+    # 7) Başlık (üstte koyu band)
     direction_text = "Bearish" if setup.direction == "bear" else "Bullish"
     title = f"terminalMiraz / {setup.symbol} {setup.interval} / {direction_text} {setup.pattern_name}"
     subtitle_parts = [f"D bölgesi: {setup.prz_low:.6g} - {setup.prz_high:.6g}"]

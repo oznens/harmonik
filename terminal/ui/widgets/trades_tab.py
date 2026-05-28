@@ -328,7 +328,7 @@ class TradesTab(QWidget):
             return
         from terminal.ui.widgets.chart_window import ChartWindow
         try:
-            win = ChartWindow(setup, self.store, parent=self)
+            win = ChartWindow(setup, self.store, parent=self, setup_id=int(setup_id))
             win.exec()
         except Exception as e:
             log.exception("Tradeler chart açma hatası")
