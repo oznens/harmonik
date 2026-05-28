@@ -493,6 +493,10 @@ def main(argv: list[str] | None = None) -> int:
         level=args.log_level.upper(),
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
+    # HTTP istemci kütüphaneleri her MEXC çağrısını INFO'da loglayıp logu
+    # boğuyor (tracker.err'i şişiren satırlar) — sadece uyarı ve üstünü göster.
+    for _noisy in ("httpx", "httpcore", "urllib3"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
 
     # Combos-file > symbols+intervals cross-product
     if args.combos_file:
