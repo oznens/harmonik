@@ -128,13 +128,30 @@ def _zigzag_layers(
 
 
 def _latest_setup_id(store: Store, symbol: str, interval: str) -> int | None:
-    cur = store._conn.execute(
+    """Bu parite/aralık için gösterilecek setup.
+
+    Önce AÇIK (Aktif/Aday) setup'lar arasından en son OLUŞAN'ı (en yeni D
+    zamanı) seçer; yoksa kapalılar dahil en son oluşan setup'a düşer.
+    `detected_at` (tarama anı) yerine `d_time` (formasyon anı) kullanılır —
+    aksi halde eski bir formasyon yeniden tarandığında "en yeni" sanılır.
+    """
+    c = store._conn
+    row = c.execute(
+        """SELECT s.id FROM setups s
+           JOIN setup_lifecycle l ON l.setup_id = s.id
+           WHERE s.symbol = ? AND s.interval = ? AND s.elenen = 0
+             AND l.state IN ('Aktif', 'Aday')
+           ORDER BY s.d_time DESC LIMIT 1""",
+        (symbol, interval),
+    ).fetchone()
+    if row:
+        return int(row[0])
+    row = c.execute(
         """SELECT id FROM setups
            WHERE symbol = ? AND interval = ? AND elenen = 0
-           ORDER BY detected_at DESC LIMIT 1""",
+           ORDER BY d_time DESC LIMIT 1""",
         (symbol, interval),
-    )
-    row = cur.fetchone()
+    ).fetchone()
     return int(row[0]) if row else None
 
 
