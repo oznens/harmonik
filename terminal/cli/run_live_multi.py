@@ -93,11 +93,30 @@ class PairWorker:
         self._last_potential_key: tuple | None = None
 
     def _on_transition(self, t: Transition) -> None:
-        # Paper trade engine — Telegram filtrelerinden bağımsız: her AKTIF
-        # setup paper'a açılsın, her exit paper'da kapansın.
+        # Giriş geçişleri (ADAY/AKTIF) için freshness + elenen kapısı: bootstrap'ta
+        # bulunan TARIHSEL setupları (eski D pivot) ne paper'a aç ne bildir.
+        # register_new agresif girişte AKTIF'i bootstrap'ta da emit ettiği için
+        # bu kapı paper'ın eski setuplarla dolmasını engeller. Çıkışlar (TP/STOP/
+        # ZI/EO) muaf — gerçek zamanlı kapanışlar her zaman işlenir.
+        if t.new_state in (ADAY, AKTIF):
+            if t.setup.elenen and not self.include_elenen:
+                log.info("%s [%s] %s elenen → atla",
+                         self._tag, t.new_state, t.setup.pattern_name)
+                return
+            latest = self.poller.buffer.latest if self.poller else None
+            if latest is not None and self.tracker is not None:
+                age = (latest["open_time"] - t.setup.pivots["D"].time) // self.tracker._interval_ms()
+                if age > self.FRESH_ADAY_BARS:
+                    log.info("%s [%s] %s D pivot eski (%d bar) → atla",
+                             self._tag, t.new_state, t.setup.pattern_name, age)
+                    return
+
+        # Paper trade motoru — confluence/Q filtrelerinden bağımsız: taze her
+        # AKTIF setup paper'a açılır, her exit paper'da kapanır.
+        opened = None
         if self.paper is not None and t.setup_id is not None:
             if t.new_state == AKTIF:
-                self.paper.open_trade(t.setup, t.setup_id, t.trigger_time)
+                opened = self.paper.open_trade(t.setup, t.setup_id, t.trigger_time)
             elif t.new_state in (TP, STOP, ZI, EO):
                 self.paper.close_trade(
                     t.setup_id, t.new_state,
@@ -106,12 +125,17 @@ class PairWorker:
 
         if self.tg is None:
             return
-        # Telegram filtreleri: hem ADAY hem AKTIF için (agresif giriş = direkt AKTIF)
+
+        # İşlem AÇILDIYSA → confluence/Q filtrelerinden BAĞIMSIZ "İŞLEM AÇILDI"
+        # bildirimi. Kullanıcı her paper pozisyon açılışını Telegram'da görmek
+        # istiyor; AKTIF kartı yerine bu zengin bildirim gider (çift mesaj olmaz).
+        if opened is not None:
+            self._notify_trade_opened(t.setup, opened)
+            return
+
+        # Telegram noise filtreleri (Q/confluence/karakter) — yalnızca kart
+        # bildirimlerini etkiler (paper modu kapalıyken AKTIF kartı + ADAY kartı).
         if t.new_state in (ADAY, AKTIF):
-            if t.setup.elenen and not self.include_elenen:
-                log.info("%s [%s] %s elenen → filtre dışı",
-                         self._tag, t.new_state, t.setup.pattern_name)
-                return
             if t.setup.q_score and t.setup.q_score < self.min_q:
                 log.info("%s [%s] %s Q=%d < min_q=%d → filtre dışı",
                          self._tag, t.new_state, t.setup.pattern_name,
@@ -130,14 +154,6 @@ class PairWorker:
                 if kar is not None and kar[1] >= 2 and kar[0] < self.min_karakter:
                     log.info("%s [%s] karakter %.1f < %.1f → filtre dışı",
                              self._tag, t.new_state, kar[0], self.min_karakter)
-                    return
-            # Freshness: çok eski D pivot bildirim yapma
-            latest = self.poller.buffer.latest if self.poller else None
-            if latest is not None:
-                age = (latest["open_time"] - t.setup.pivots["D"].time) // self.tracker._interval_ms()
-                if age > self.FRESH_ADAY_BARS:
-                    log.info("%s [%s] %s D pivot çok eski (%d bar) → filtre dışı",
-                             self._tag, t.new_state, t.setup.pattern_name, age)
                     return
         try:
             if t.new_state == ADAY:
@@ -181,6 +197,40 @@ class PairWorker:
                         self._tag, t.new_state, e)
         except Exception as e:
             log.exception("%s _on_transition beklenmedik hata: %s", self._tag, e)
+
+    def _notify_trade_opened(self, setup, trade) -> None:
+        """Paper pozisyon açıldığında Telegram bildirimi (filtrelerden bağımsız).
+
+        Confluence/Q eşiklerine takılsa bile, sistem gerçekten paper işlem
+        açtıysa kullanıcı haberdar edilir. Çift mesaj olmaması için AKTIF kartı
+        yerine bu zengin "İŞLEM AÇILDI" kartı gönderilir.
+        """
+        try:
+            karakter = None
+            if self.store is not None:
+                karakter = self.store.get_karakter_score(
+                    setup.symbol, setup.interval, setup.pattern_name, setup.direction,
+                )
+            eq = self.paper.get_equity()
+            caption = aday_card(setup, karakter=karakter)
+            caption += (
+                "\n\n📈 *İŞLEM AÇILDI* (paper)\n"
+                f"Pozisyon: `${trade.position_usd:.0f}`  ·  "
+                f"Kaldıraç: `{trade.leverage:.0f}x`  ·  Risk: `${trade.risk_usd:.0f}`\n"
+                f"Equity: `${eq:.2f}`"
+            )
+            if not self.no_chart:
+                chart = render_setup_chart(setup, self.poller.buffer.as_list())
+                self.tg.send_photo(chart, caption=caption)
+            else:
+                self.tg.send_message(caption)
+            log.info("%s [İŞLEM AÇILDI] %s %s pos=$%.0f lev=%.0fx conf=%d → Telegram",
+                     self._tag, setup.pattern_name, setup.direction,
+                     trade.position_usd, trade.leverage, setup.confluence_score)
+        except TelegramError as e:
+            log.warning("%s işlem-açıldı Telegram hatası: %s", self._tag, e)
+        except Exception as e:
+            log.exception("%s _notify_trade_opened hata: %s", self._tag, e)
 
     def _fetch_htf(self) -> list[dict[str, Any]] | None:
         if self.htf_interval is None or self.client is None:
