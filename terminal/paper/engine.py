@@ -137,8 +137,17 @@ class PaperEngine:
         )
         return float(cur.fetchone()[0])
 
-    def open_trade(self, setup: Setup, setup_id: int, opened_at: int) -> PaperTrade | None:
-        """Setup Aktif olduğunda paper pozisyon aç. Zaten varsa None."""
+    def open_trade(self, setup: Setup, setup_id: int, opened_at: int,
+                   entry_price: float | None = None) -> PaperTrade | None:
+        """Setup Aktif olduğunda paper pozisyon aç. Zaten varsa None.
+
+        Args:
+            entry_price: Gerçek dolum fiyatı. None ise setup.entry (ideal D
+                limit) kullanılır. Gerçekçi modda sonraki barın açılışı geçilir;
+                P&L bu fiyata göre hesaplanır. Pozisyon büyüklüğü planlanan
+                risk için yine setup.entry/stop üzerinden boyutlanır ($20 risk
+                niyeti sabit kalsın).
+        """
         # Aynı setup için açık trade var mı
         cur = self.store._conn.execute(
             "SELECT 1 FROM paper_trades WHERE setup_id = ?", (setup_id,)
@@ -166,6 +175,7 @@ class PaperEngine:
         if position <= 0:
             return None
 
+        fill = entry_price if entry_price is not None else setup.entry
         self.store._conn.execute(
             """INSERT INTO paper_trades
                (setup_id, symbol, interval, pattern, direction,
@@ -173,16 +183,17 @@ class PaperEngine:
                 position_usd, leverage, risk_usd, opened_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (setup_id, setup.symbol, setup.interval, setup.pattern_name,
-             setup.direction, setup.entry, setup.stop, setup.tp1,
+             setup.direction, fill, setup.stop, setup.tp1,
              position, leverage, self.risk_per_trade, opened_at),
         )
-        log.info("PAPER OPEN: %s %s %s pos=$%.2f lev=%.0fx risk=$%.0f",
-                 setup.symbol, setup.interval, setup.pattern_name,
-                 position, leverage, self.risk_per_trade)
+        log.info("PAPER OPEN: %s %s %s fill=%.6g (ideal=%.6g) pos=$%.2f "
+                 "lev=%.0fx risk=$%.0f", setup.symbol, setup.interval,
+                 setup.pattern_name, fill, setup.entry, position, leverage,
+                 self.risk_per_trade)
         return PaperTrade(
             setup_id=setup_id, symbol=setup.symbol, interval=setup.interval,
             pattern=setup.pattern_name, direction=setup.direction,
-            entry_price=setup.entry, stop_price=setup.stop, tp1_price=setup.tp1,
+            entry_price=fill, stop_price=setup.stop, tp1_price=setup.tp1,
             position_usd=position, leverage=leverage,
             risk_usd=self.risk_per_trade, opened_at=opened_at,
         )

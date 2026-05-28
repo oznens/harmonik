@@ -91,6 +91,9 @@ class PairWorker:
         self._tag = f"[{symbol} {interval}]"
         # Potansiyel pattern dedup key — (spec_name, x_time, a_time, b_time, c_time)
         self._last_potential_key: tuple | None = None
+        # Gerçekçi giriş: AKTIF olan setup'lar sonraki barın açılışından
+        # doldurulmak üzere burada bekler — {setup_id: Setup}.
+        self._pending_entries: dict[int, Any] = {}
 
     def _on_transition(self, t: Transition) -> None:
         # Giriş geçişleri (ADAY/AKTIF) için freshness + elenen kapısı: bootstrap'ta
@@ -111,12 +114,14 @@ class PairWorker:
                              self._tag, t.new_state, t.setup.pattern_name, age)
                     return
 
-        # Paper trade motoru — confluence/Q filtrelerinden bağımsız: taze her
-        # AKTIF setup paper'a açılır, her exit paper'da kapanır.
-        opened = None
+        # Paper trade motoru — confluence/Q filtrelerinden bağımsız.
+        # AKTIF: hemen açma — gerçekçi giriş için SONRAKİ barın açılışından
+        # doldurulmak üzere pending'e al (fill + bildirim _fill_pending_entries
+        # içinde). Çıkış: paper'da kapat.
         if self.paper is not None and t.setup_id is not None:
             if t.new_state == AKTIF:
-                opened = self.paper.open_trade(t.setup, t.setup_id, t.trigger_time)
+                self._pending_entries[t.setup_id] = t.setup
+                return  # dolum sonraki barda; AKTIF kartı/bildirimi o an
             elif t.new_state in (TP, STOP, ZI, EO):
                 self.paper.close_trade(
                     t.setup_id, t.new_state,
@@ -124,18 +129,6 @@ class PairWorker:
                 )
 
         if self.tg is None:
-            return
-
-        # İşlem AÇILDIYSA → confluence/Q filtrelerinden BAĞIMSIZ "İŞLEM AÇILDI"
-        # bildirimi. Kullanıcı her paper pozisyon açılışını Telegram'da görmek
-        # istiyor; AKTIF kartı yerine bu zengin bildirim gider (çift mesaj olmaz).
-        if opened is not None:
-            self._notify_trade_opened(t.setup, opened)
-            return
-        # Paper açık ama işlem AÇILMADIYSA (parite dolu / zaten var / geçersiz
-        # pozisyon) AKTIF kartı yollama — paper modunda tek AKTIF bildirimi
-        # İŞLEM AÇILDI'dır.
-        if self.paper is not None and t.new_state == AKTIF:
             return
 
         # Telegram noise filtreleri (Q/confluence/karakter) — yalnızca kart
@@ -218,8 +211,13 @@ class PairWorker:
                 )
             eq = self.paper.get_equity()
             caption = aday_card(setup, karakter=karakter)
+            # Gerçek dolum (sonraki bar açılışı) ideal D'den sapmış olabilir
+            slip = ((trade.entry_price - setup.entry) / setup.entry * 100
+                    if setup.entry else 0.0)
             caption += (
                 "\n\n📈 *İŞLEM AÇILDI* (paper)\n"
+                f"Dolum: `{trade.entry_price:.6g}` (sonraki bar açılışı, "
+                f"ideal `{setup.entry:.6g}` · {slip:+.2f}%)\n"
                 f"Pozisyon: `${trade.position_usd:.0f}`  ·  "
                 f"Kaldıraç: `{trade.leverage:.0f}x`  ·  Risk: `${trade.risk_usd:.0f}`\n"
                 f"Equity: `${eq:.2f}`"
@@ -246,10 +244,39 @@ class PairWorker:
             log.warning("%s HTF fetch: %s", self._tag, e)
         return self._htf_cache
 
+    def _fill_pending_entries(self, fill_bar: dict[str, Any]) -> None:
+        """Önceki barda AKTIF olan setup'ları bu barın AÇILIŞINDAN doldur.
+
+        Gerçekçi market girişi: oluşum bar kapanışında onaylandı → emir bir
+        SONRAKİ barın açılış fiyatından dolar. fill_bar = yeni kapanan bar
+        (klines[-1]); P&L bu fiyata göre hesaplanır. _process başında, tarama
+        ve advance'ten ÖNCE çağrılır (aynı bar içinde açılıp kapanabilsin).
+        """
+        if not self._pending_entries or self.paper is None:
+            return
+        fill_price = fill_bar["open"]
+        fill_time = fill_bar["open_time"]
+        pending = self._pending_entries
+        self._pending_entries = {}
+        for sid, setup in pending.items():
+            # Setup dolum beklerken zaten kapandıysa (backfill/advance terminal
+            # yaptıysa) işlemi açma — stale trade olmasın.
+            life = self.store.get_lifecycle(sid) if self.store else None
+            if life is None or life["state"] != AKTIF:
+                continue
+            trade = self.paper.open_trade(setup, sid, fill_time, entry_price=fill_price)
+            if trade is None:
+                continue  # parite dolu / zaten var / geçersiz pozisyon
+            if self.tg is not None:
+                self._notify_trade_opened(setup, trade)
+
     def _process(self, _closed: dict[str, Any] | None) -> None:
         klines = self.poller.buffer.as_list()
         if len(klines) < 20:
             return
+        # Gerçekçi giriş: önceki barda biriken AKTIF setupları bu barın
+        # açılışından doldur (tarama/advance'ten önce).
+        self._fill_pending_entries(klines[-1])
         htf_klines = self._fetch_htf()
         setups = scan_klines(klines, self.symbol, self.interval,
                              zigzag_threshold=self.threshold, htf_klines=htf_klines)
