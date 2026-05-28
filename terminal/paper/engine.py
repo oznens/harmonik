@@ -146,6 +146,19 @@ class PaperEngine:
         if cur.fetchone() is not None:
             return None
 
+        # Parite başına tek açık pozisyon: aynı sembolde halen açık trade
+        # varsa yenisini açma (ilk AKTIF olan TF kazanır). Korelasyonlu risk
+        # yığılmasını engeller.
+        busy = self.store._conn.execute(
+            "SELECT setup_id, interval FROM paper_trades "
+            "WHERE symbol = ? AND closed_at IS NULL LIMIT 1",
+            (setup.symbol,),
+        ).fetchone()
+        if busy is not None:
+            log.info("PAPER SKIP: %s zaten açık pozisyonda (#%s %s) — "
+                     "parite başı tek pozisyon", setup.symbol, busy[0], busy[1])
+            return None
+
         equity = self.get_equity()
         position, leverage = compute_position(
             setup.entry, setup.stop, equity, self.risk_per_trade,

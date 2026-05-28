@@ -132,6 +132,11 @@ class PairWorker:
         if opened is not None:
             self._notify_trade_opened(t.setup, opened)
             return
+        # Paper açık ama işlem AÇILMADIYSA (parite dolu / zaten var / geçersiz
+        # pozisyon) AKTIF kartı yollama — paper modunda tek AKTIF bildirimi
+        # İŞLEM AÇILDI'dır.
+        if self.paper is not None and t.new_state == AKTIF:
+            return
 
         # Telegram noise filtreleri (Q/confluence/karakter) — yalnızca kart
         # bildirimlerini etkiler (paper modu kapalıyken AKTIF kartı + ADAY kartı).
