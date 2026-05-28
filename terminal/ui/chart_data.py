@@ -155,12 +155,58 @@ def _latest_setup_id(store: Store, symbol: str, interval: str) -> int | None:
     return int(row[0]) if row else None
 
 
-def _harmonic_layer(store: Store, symbol: str, interval: str) -> dict[str, Any]:
-    """En son Setup → XABCD çizgisi + harf işaretleri + Entry/SL/TP/PRZ seviyeleri."""
-    sid = _latest_setup_id(store, symbol, interval)
-    if sid is None:
-        return {"present": False}
-    setup = store.load_setup(sid)
+def _setup_label(pattern: str, direction: str, q_score, state: str) -> str:
+    q_part = f" Q{q_score}" if q_score else ""
+    st = f" · {state}" if state else ""
+    return f"{direction.upper()} {pattern}{q_part}{st}"
+
+
+def list_open_setups(
+    store: Store, symbol: str, interval: str, limit: int = 30,
+) -> list[dict[str, Any]]:
+    """Bu parite/aralık için AÇIK (Aktif/Aday) setup'lar — seçici dropdown için."""
+    rows = store._conn.execute(
+        """SELECT s.id, s.pattern_name, s.direction, s.q_score, l.state
+           FROM setups s
+           JOIN setup_lifecycle l ON l.setup_id = s.id
+           WHERE s.symbol = ? AND s.interval = ? AND s.elenen = 0
+             AND l.state IN ('Aktif', 'Aday')
+           ORDER BY s.d_time DESC LIMIT ?""",
+        (symbol, interval, limit),
+    ).fetchall()
+    return [
+        {"id": int(r[0]), "label": _setup_label(r[1], r[2], r[3], r[4]),
+         "direction": r[2], "state": r[4]}
+        for r in rows
+    ]
+
+
+def _single_setup_option(store: Store, sid: int) -> dict[str, Any] | None:
+    r = store._conn.execute(
+        """SELECT s.pattern_name, s.direction, s.q_score, COALESCE(l.state, 'Kapalı')
+           FROM setups s LEFT JOIN setup_lifecycle l ON l.setup_id = s.id
+           WHERE s.id = ?""",
+        (sid,),
+    ).fetchone()
+    if r is None:
+        return None
+    return {"id": int(sid), "label": _setup_label(r[0], r[1], r[2], r[3]),
+            "direction": r[1], "state": r[3]}
+
+
+def _harmonic_layer(
+    store: Store, symbol: str, interval: str, setup_id: int | None = None,
+) -> dict[str, Any]:
+    """Setup → XABCD çizgisi + harf işaretleri + Entry/SL/TP/PRZ seviyeleri.
+
+    `setup_id` verilirse o setup çizilir; bulunamazsa otomatik seçime düşer.
+    """
+    sid = setup_id if setup_id is not None else _latest_setup_id(store, symbol, interval)
+    setup = store.load_setup(sid) if sid is not None else None
+    if setup is None and setup_id is not None:
+        # seçilen setup yok → otomatik seçime düş
+        sid = _latest_setup_id(store, symbol, interval)
+        setup = store.load_setup(sid) if sid is not None else None
     if setup is None:
         return {"present": False}
 
@@ -192,16 +238,19 @@ def _harmonic_layer(store: Store, symbol: str, interval: str) -> dict[str, Any]:
     q_part = f" · Q{setup.q_score} {setup.q_category}".rstrip() if setup.q_score else ""
     label = f"{setup.direction.upper()} {setup.pattern_name}{q_part}"
     return {
-        "present": True, "label": label, "direction": setup.direction,
+        "present": True, "id": sid, "label": label, "direction": setup.direction,
         "line": line, "markers": markers, "levels": levels,
     }
 
 
-def _htf_layer(store: Store, symbol: str, interval: str) -> dict[str, Any]:
-    sid = _latest_setup_id(store, symbol, interval)
-    if sid is None:
-        return {"present": False}
-    setup = store.load_setup(sid)
+def _htf_layer(
+    store: Store, symbol: str, interval: str, setup_id: int | None = None,
+) -> dict[str, Any]:
+    sid = setup_id if setup_id is not None else _latest_setup_id(store, symbol, interval)
+    setup = store.load_setup(sid) if sid is not None else None
+    if setup is None and setup_id is not None:
+        sid = _latest_setup_id(store, symbol, interval)
+        setup = store.load_setup(sid) if sid is not None else None
     if setup is None or not setup.htf_trend:
         return {"present": False}
     trend = setup.htf_trend
@@ -219,10 +268,12 @@ def build_payload(
     limit: int = 200, client: Any | None = None,
     include_pairs: bool = True,
     klines: list[dict[str, Any]] | None = None,
+    setup_id: int | None = None,
 ) -> dict[str, Any]:
     """Tam grafik yükü: mumlar + tüm katmanlar (full reload).
 
     `klines` verilirse DB/ağ yüklemesi atlanır (çağıran kendi mumunu sağlar).
+    `setup_id` verilirse harmonik katman o setup'ı çizer (yoksa otomatik).
     """
     if klines is None:
         klines = _load_klines(store, symbol, interval, limit, client)
@@ -236,11 +287,22 @@ def build_payload(
         "vector": {"line": []},
         "harmonic": {"present": False},
         "htf": {"present": False},
+        "setups": list_open_setups(store, symbol, interval),
+        "selected": "auto",
     }
     if klines:
         payload["pivots"], payload["vector"] = _zigzag_layers(klines, interval)
-        payload["harmonic"] = _harmonic_layer(store, symbol, interval)
-        payload["htf"] = _htf_layer(store, symbol, interval)
+        payload["harmonic"] = _harmonic_layer(store, symbol, interval, setup_id)
+        payload["htf"] = _htf_layer(store, symbol, interval, setup_id)
+    # Çizilen setup gerçekten istenen mi? (fallback olduysa "auto" göster)
+    drawn_id = payload["harmonic"].get("id")
+    if setup_id is not None and drawn_id == setup_id:
+        payload["selected"] = str(setup_id)
+        # Seçilen açık listede yoksa (kapalı/eski) yine de seçilebilsin
+        if not any(s["id"] == setup_id for s in payload["setups"]):
+            opt = _single_setup_option(store, setup_id)
+            if opt:
+                payload["setups"].insert(0, opt)
     if include_pairs:
         payload["pairs"] = available_pairs(store)
     return payload

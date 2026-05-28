@@ -39,15 +39,15 @@ class ChartBridge(QObject):
     liveUpdate = Signal(str)       # canlı mum güncellemesi (JSON)
     liveState = Signal(bool, str)  # canlı bağlantı durumu (açık?, etiket)
     pageReady = Signal()
-    dataRequested = Signal(str, str)
+    dataRequested = Signal(str, str, str)  # symbol, interval, setup ("auto"|id)
 
     @Slot()
     def ready(self) -> None:
         self.pageReady.emit()
 
-    @Slot(str, str)
-    def requestData(self, symbol: str, interval: str) -> None:
-        self.dataRequested.emit(symbol, interval)
+    @Slot(str, str, str)
+    def requestData(self, symbol: str, interval: str, setup: str) -> None:
+        self.dataRequested.emit(symbol, interval, setup)
 
 
 class _TaskSignals(QObject):
@@ -91,6 +91,7 @@ class LiveChartTab(QWidget):
         self._loading_full = False
         self._tick = 0
         self._ready = False
+        self._setup_id: int | None = None  # None = otomatik seçim
 
         pairs = chart_data.available_pairs(store)
         self._symbol = pairs["symbols"][0] if pairs["symbols"] else "BTCUSDT"
@@ -140,9 +141,10 @@ class LiveChartTab(QWidget):
         self._request_full(include_pairs=True)
         self._timer.start()
 
-    @Slot(str, str)
-    def _on_request(self, symbol: str, interval: str) -> None:
+    @Slot(str, str, str)
+    def _on_request(self, symbol: str, interval: str, setup: str) -> None:
         self._symbol, self._interval = symbol, interval
+        self._setup_id = int(setup) if setup.isdigit() else None
         self._request_full(include_pairs=False)
 
     # ---- tam yük (overlay'ler dahil) ----

@@ -48,6 +48,7 @@
     <div class="brand">CANLI GRAFİK<small>execution-grade candle stream</small></div>
     <select id="symbol" title="Parite"></select>
     <select id="interval" title="Zaman dilimi"></select>
+    <select id="setup" title="Çizilecek formasyon"></select>
     <span class="live"><span id="liveDot" class="dot"></span><span id="liveText">bağlanıyor…</span></span>
     <div id="layers">
       <span class="pill" data-layer="pivot">Pivot</span>
@@ -198,6 +199,22 @@ function fillPairs(pairs, symbol, interval) {
   fillSelect(el("interval"), pairs.intervals || [], interval);
   suppressChange = false;
 }
+function fillSetups(setups, selected) {
+  const sel = el("setup");
+  suppressChange = true;
+  sel.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "auto"; auto.textContent = "Otomatik (güncel)";
+  sel.appendChild(auto);
+  for (const s of (setups || [])) {
+    const o = document.createElement("option");
+    o.value = String(s.id); o.textContent = s.label;
+    sel.appendChild(o);
+  }
+  sel.value = selected || "auto";
+  if (!sel.value) sel.value = "auto";
+  suppressChange = false;
+}
 
 // ---- Etkileşim -------------------------------------------------------------
 document.querySelectorAll(".pill").forEach((p) => {
@@ -215,13 +232,17 @@ function syncPills() {
 }
 
 let bridge = null;
-function requestData() {
+function requestData(forceSetup) {
   if (!bridge || suppressChange) return;
   showStatus("Yükleniyor…");
-  bridge.requestData(el("symbol").value, el("interval").value);
+  const setupVal = (forceSetup !== undefined)
+    ? forceSetup : (el("setup").value || "auto");
+  bridge.requestData(el("symbol").value, el("interval").value, setupVal);
 }
-el("symbol").addEventListener("change", requestData);
-el("interval").addEventListener("change", requestData);
+// Parite/aralık değişince setup seçimini sıfırla (otomatik)
+el("symbol").addEventListener("change", () => requestData("auto"));
+el("interval").addEventListener("change", () => requestData("auto"));
+el("setup").addEventListener("change", () => requestData(el("setup").value));
 
 // ---- QWebChannel köprüsü ---------------------------------------------------
 function setLive(on, text) {
@@ -234,6 +255,7 @@ new QWebChannel(qt.webChannelTransport, function (channel) {
   bridge.dataReady.connect(function (json) {
     const d = JSON.parse(json);
     if (d.pairs) fillPairs(d.pairs, d.symbol, d.interval);
+    fillSetups(d.setups, d.selected);
     applyFull(d);
   });
   bridge.liveUpdate.connect(function (json) { applyLive(JSON.parse(json)); });
