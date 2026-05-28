@@ -65,6 +65,10 @@ class LifecycleTracker:
         self._aktif_to = aktif_bars_timeout
         # backfill sırasında True olur → on_transition'a iletilmez
         self._silent = False
+        # reconcile sırasında True olur → SADECE çıkış (TP/STOP/ZI/EO) geçişleri
+        # on_transition'a iletilir (paper kapatma + bildirim). Giriş geçişleri
+        # (ADAY/AKTIF) restart'ta tekrar kart/işlem üretmesin diye susturulur.
+        self._exits_only = False
         # Otomatik temizleme: elenen setupların eski yaşam döngüsü kayıtları
         # (önceki versiyon davranışı). Sessiz, log spam yok.
         self.store._conn.execute(
@@ -206,6 +210,63 @@ class LifecycleTracker:
 
         return transitions
 
+    def reconcile(self, klines: list[dict[str, Any]]) -> list[Transition]:
+        """Açık (Aday/Aktif) setup'ları tampondaki TÜM mumlar üzerinden onar.
+
+        `advance()` yalnızca son mumu kontrol ettiğinden, süreç bir süre kapalı
+        kaldığında (restart/deploy/MEXC kesintisi) ya da poll boşluğunda, ara
+        bir barda gerçekleşen STOP/TP kalıcı olarak kaçar — setup yanlışlıkla
+        "Aktif" kalır. Bu metod bootstrap sonrası çağrılır ve kaçan çıkışları
+        kronolojik sırayla yeniden uygular.
+
+        Çıkış geçişleri (TP/STOP/ZI/EO) on_transition'a iletilir → paper trade
+        kapanır + (varsa) bildirim. Giriş geçişleri (ADAY→AKTIF) susturulur
+        (`_exits_only`) — restart'ta eski AKTIF kartları/işlemleri tekrar
+        üretilmesin. D pivotu tamponun gerisinde kalan çok eski setup'lar için
+        `terminal.cli.reevaluate` (tam tarihsel) gerekir.
+        """
+        if len(klines) < 2:
+            return []
+        interval_ms = self._interval_ms()
+        transitions: list[Transition] = []
+        self._exits_only = True
+        try:
+            for row in self.store.open_setups(self.symbol, self.interval):
+                setup_id = int(row["setup_id"])
+                setup = self.store.load_setup(setup_id)
+                if setup is None:
+                    continue
+                d_time = setup.pivots["D"].time
+                for bar in klines:
+                    life = self.store.get_lifecycle(setup_id)
+                    if life is None or life["state"] in TERMINAL_STATES:
+                        break
+                    state = life["state"]
+                    bt = bar["open_time"]
+                    if state == ADAY:
+                        if bt <= d_time:
+                            continue  # D pivotundan önceki barlar entry sayılmaz
+                        bars_since_d = max(0, (bt - d_time) // interval_ms)
+                        t = self._check_aday(setup, setup_id, bar["high"],
+                                             bar["low"], bt, bars_since_d)
+                    elif state == AKTIF:
+                        entered_at = life["entered_at"]
+                        if entered_at and bt < entered_at:
+                            continue  # girişten önceki barlar TP/SL sayılmaz
+                        bars_since_entry = (
+                            max(0, (bt - entered_at) // interval_ms)
+                            if entered_at else 0
+                        )
+                        t = self._check_aktif(setup, setup_id, bar["high"],
+                                              bar["low"], bt, bars_since_entry)
+                    else:
+                        t = None
+                    if t:
+                        transitions.append(t)
+        finally:
+            self._exits_only = False
+        return transitions
+
     # ---- iç kontrol mantığı ----
 
     def _check_aday(self, setup: Setup, setup_id: int,
@@ -280,7 +341,11 @@ class LifecycleTracker:
         return trans
 
     def _emit(self, trans: Transition) -> None:
-        if self.on_transition and not self._silent:
+        if self._silent:
+            return
+        if self._exits_only and trans.new_state not in TERMINAL_STATES:
+            return  # reconcile: girişleri susturup yalnızca çıkışları yay
+        if self.on_transition:
             try:
                 self.on_transition(trans)
             except Exception:

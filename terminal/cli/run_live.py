@@ -187,6 +187,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         poller.bootstrap()
+        # Bootstrap sonrası: kaçan STOP/TP'yi onar (stale "Aktif" engellenir).
+        # Geçmiş çıkışlar için Telegram bildirimi yağdırmamak adına on_transition
+        # bu pas boyunca susturulur.
+        _saved_cb = tracker.on_transition
+        tracker.on_transition = None
+        try:
+            reconciled = tracker.reconcile(poller.buffer.as_list())
+        finally:
+            tracker.on_transition = _saved_cb
+        if reconciled:
+            log.info("Reconcile: %d kaçan çıkış onarıldı", len(reconciled))
         log.info("İlk tarama (ZigZag eşik=%.4f)...", threshold)
         process_new_candle(None)
         stats = store.lifecycle_stats(symbol, interval)

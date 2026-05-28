@@ -94,6 +94,9 @@ class PairWorker:
         # Gerçekçi giriş: AKTIF olan setup'lar sonraki barın açılışından
         # doldurulmak üzere burada bekler — {setup_id: Setup}.
         self._pending_entries: dict[int, Any] = {}
+        # Bootstrap reconcile sırasında True → kaçan çıkışlar paper'a yansır ama
+        # Telegram'a eski bildirim yağmuru gönderilmez.
+        self._in_reconcile = False
 
     def _on_transition(self, t: Transition) -> None:
         # Giriş geçişleri (ADAY/AKTIF) için freshness + elenen kapısı: bootstrap'ta
@@ -127,6 +130,11 @@ class PairWorker:
                     t.setup_id, t.new_state,
                     t.trigger_price or t.setup.entry, t.trigger_time,
                 )
+
+        # Reconcile catch-up: paper senkronlandı, geçmiş çıkışları Telegram'a
+        # yağdırma (deploy/restart sonrası bildirim seli olmasın).
+        if self._in_reconcile:
+            return
 
         if self.tg is None:
             return
@@ -270,6 +278,30 @@ class PairWorker:
             if self.tg is not None:
                 self._notify_trade_opened(setup, trade)
 
+    def _reconcile_open(self) -> None:
+        """Bootstrap sonrası: açık setup'larda kaçan STOP/TP'yi onar.
+
+        Süreç kapalıyken (restart/deploy/MEXC kesintisi) gerçekleşen çıkışlar
+        advance() tek-mum kontrolünden kaçar; setup yanlışlıkla "Aktif" kalır.
+        Bu pas tampondaki tüm mumları tarayıp gerçek çıkışları uygular, paper
+        defterini de senkronlar (çıkış geçişleri on_transition'dan akar).
+        """
+        if self.tracker is None or self.poller is None:
+            return
+        klines = self.poller.buffer.as_list()
+        self._in_reconcile = True
+        try:
+            transitions = self.tracker.reconcile(klines)
+        except Exception:
+            log.exception("%s reconcile hatası", self._tag)
+            return
+        finally:
+            self._in_reconcile = False
+        if transitions:
+            log.info("%s reconcile: %d kaçan geçiş onarıldı (%s)", self._tag,
+                     len(transitions),
+                     ", ".join(f"#{t.setup_id}:{t.new_state}" for t in transitions))
+
     def _process(self, _closed: dict[str, Any] | None) -> None:
         klines = self.poller.buffer.as_list()
         if len(klines) < 20:
@@ -349,6 +381,7 @@ class PairWorker:
         )
         try:
             self.poller.bootstrap()
+            self._reconcile_open()
             self._process(None)
             self._running = True
             self.poller.poll_loop()
