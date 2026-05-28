@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Canlı Grafik</title>
+<style>
+  :root {
+    --bg: #0e0e10; --panel: #1a1a1f; --border: #2a2a32;
+    --text: #e6e6ea; --dim: #888894; --gold: #d4a72c;
+    --green: #4caf50; --red: #ef5350;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', 'SF Pro Text', sans-serif; font-size: 12px; overflow: hidden; }
+  #wrap { display: flex; flex-direction: column; height: 100vh; }
+  #topbar { display: flex; align-items: center; gap: 14px; padding: 8px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .brand { font-weight: 700; color: var(--gold); letter-spacing: .5px; }
+  .brand small { color: var(--dim); font-weight: 400; margin-left: 6px; }
+  select { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .dot.on { background: var(--green); box-shadow: 0 0 0 0 rgba(76,175,80,.7);
+    animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(76,175,80,.6)} 70%{box-shadow:0 0 0 7px rgba(76,175,80,0)} 100%{box-shadow:0 0 0 0 rgba(76,175,80,0)} }
+  #layers { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .pill { padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--bg); color: var(--dim); cursor: pointer; user-select: none;
+    font-weight: 600; transition: all .12s; }
+  .pill:hover { border-color: var(--gold); }
+  .pill.active { background: var(--gold); color: var(--bg); border-color: var(--gold); }
+  .pill.disabled { opacity: .4; cursor: not-allowed; }
+  #chart { flex: 1; position: relative; }
+  #hud { position: absolute; top: 10px; left: 12px; z-index: 5; pointer-events: none;
+    display: flex; flex-direction: column; gap: 4px; }
+  #harmonicLabel { font-weight: 700; color: var(--gold); text-shadow: 0 1px 3px #000; }
+  #htfBadge { display: none; align-self: flex-start; padding: 2px 9px; border-radius: 4px;
+    font-weight: 700; color: #0e0e10; font-size: 11px; }
+  #status { position: absolute; inset: 0; display: none; align-items: center;
+    justify-content: center; color: var(--dim); z-index: 6; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="topbar">
+    <div class="brand">CANLI GRAFİK<small>execution-grade candle stream</small></div>
+    <select id="symbol" title="Parite"></select>
+    <select id="interval" title="Zaman dilimi"></select>
+    <span class="live"><span id="liveDot" class="dot"></span><span id="liveText">bağlanıyor…</span></span>
+    <div id="layers">
+      <span class="pill" data-layer="pivot">Pivot</span>
+      <span class="pill" data-layer="vector">Vector</span>
+      <span class="pill" data-layer="harmonic">Harmonic</span>
+      <span class="pill" data-layer="htf">HTF</span>
+    </div>
+  </div>
+  <div id="chart">
+    <div id="hud">
+      <div id="harmonicLabel"></div>
+      <div id="htfBadge"></div>
+    </div>
+    <div id="status">Yükleniyor…</div>
+  </div>
+</div>
+
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="lightweight-charts.standalone.production.js"></script>
+<script>
+"use strict";
+
+const LWC = window.LightweightCharts;
+const el = (id) => document.getElementById(id);
+const statusEl = el("status");
+function showStatus(msg) { if (msg) { statusEl.textContent = msg; statusEl.style.display = "flex"; } else { statusEl.style.display = "none"; } }
+
+// ---- Chart kurulumu --------------------------------------------------------
+const chart = LWC.createChart(el("chart"), {
+  layout: { background: { color: "#0e0e10" }, textColor: "#e6e6ea", fontSize: 11 },
+  grid: { vertLines: { color: "#1c1c22" }, horzLines: { color: "#1c1c22" } },
+  rightPriceScale: { borderColor: "#2a2a32" },
+  timeScale: { borderColor: "#2a2a32", timeVisible: true, secondsVisible: false },
+  crosshair: { mode: LWC.CrosshairMode.Normal },
+  autoSize: true,
+});
+
+const candleSeries = chart.addCandlestickSeries({
+  upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
+  wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+});
+
+const volumeSeries = chart.addHistogramSeries({
+  priceFormat: { type: "volume" }, priceScaleId: "vol",
+});
+chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+const vectorSeries = chart.addLineSeries({
+  color: "#4caf50", lineWidth: 2, lastValueVisible: false, priceLineVisible: false,
+});
+const harmonicSeries = chart.addLineSeries({
+  color: "#d4a72c", lineWidth: 2, lineStyle: LWC.LineStyle.Dashed,
+  lastValueVisible: false, priceLineVisible: false,
+});
+
+// ---- Katman durumu ---------------------------------------------------------
+const layers = { pivot: true, vector: true, harmonic: true, htf: true };
+const markerSets = { pivot: [], harmonic: [] };
+let harmonicPriceLines = [];
+let lastHarmonic = { present: false };
+let lastHtf = { present: false };
+
+const STYLE_MAP = {
+  solid: LWC.LineStyle.Solid, dashed: LWC.LineStyle.Dashed, dotted: LWC.LineStyle.Dotted,
+};
+
+function refreshMarkers() {
+  let merged = [];
+  if (layers.pivot) merged = merged.concat(markerSets.pivot);
+  if (layers.harmonic) merged = merged.concat(markerSets.harmonic);
+  merged.sort((a, b) => a.time - b.time);
+  candleSeries.setMarkers(merged);
+}
+
+function clearHarmonicLines() {
+  for (const pl of harmonicPriceLines) { try { candleSeries.removePriceLine(pl); } catch (e) {} }
+  harmonicPriceLines = [];
+}
+
+function applyHarmonicLines() {
+  clearHarmonicLines();
+  if (!layers.harmonic || !lastHarmonic.present) return;
+  for (const lv of (lastHarmonic.levels || [])) {
+    harmonicPriceLines.push(candleSeries.createPriceLine({
+      price: lv.price, color: lv.color, lineWidth: 1,
+      lineStyle: STYLE_MAP[lv.style] || LWC.LineStyle.Dashed,
+      axisLabelVisible: true, title: lv.title,
+    }));
+  }
+}
+
+function applyHud() {
+  el("harmonicLabel").textContent =
+    (layers.harmonic && lastHarmonic.present) ? lastHarmonic.label : "";
+  const badge = el("htfBadge");
+  if (layers.htf && lastHtf.present) {
+    badge.textContent = lastHtf.text;
+    badge.style.background = lastHtf.color;
+    badge.style.display = "inline-block";
+  } else {
+    badge.style.display = "none";
+  }
+}
+
+function applyLayerVisibility() {
+  vectorSeries.applyOptions({ visible: layers.vector });
+  harmonicSeries.applyOptions({ visible: layers.harmonic });
+  refreshMarkers();
+  applyHarmonicLines();
+  applyHud();
+}
+
+// ---- Veri uygulayıcılar ----------------------------------------------------
+function applyFull(d) {
+  showStatus(d.candles && d.candles.length ? "" : "Mum verisi yok — run_live ile akış başlat");
+  candleSeries.setData(d.candles || []);
+  volumeSeries.setData(d.volume || []);
+  vectorSeries.setData((d.vector && d.vector.line) || []);
+  harmonicSeries.setData((d.harmonic && d.harmonic.present && d.harmonic.line) || []);
+  markerSets.pivot = (d.pivots && d.pivots.markers) || [];
+  markerSets.harmonic = (d.harmonic && d.harmonic.markers) || [];
+  lastHarmonic = d.harmonic || { present: false };
+  lastHtf = d.htf || { present: false };
+  applyLayerVisibility();
+  if (d.candles && d.candles.length) chart.timeScale().fitContent();
+}
+
+function applyLive(d) {
+  for (const b of (d.candles || [])) candleSeries.update(b);
+  for (const v of (d.volume || [])) volumeSeries.update(v);
+}
+
+// ---- Combo doldurma --------------------------------------------------------
+let suppressChange = false;
+function fillSelect(sel, items, current) {
+  sel.innerHTML = "";
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = it; o.textContent = it;
+    if (it === current) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+function fillPairs(pairs, symbol, interval) {
+  if (!pairs) return;
+  suppressChange = true;
+  fillSelect(el("symbol"), pairs.symbols || [], symbol);
+  fillSelect(el("interval"), pairs.intervals || [], interval);
+  suppressChange = false;
+}
+
+// ---- Etkileşim -------------------------------------------------------------
+document.querySelectorAll(".pill").forEach((p) => {
+  p.addEventListener("click", () => {
+    const name = p.dataset.layer;
+    layers[name] = !layers[name];
+    p.classList.toggle("active", layers[name]);
+    applyLayerVisibility();
+  });
+});
+function syncPills() {
+  document.querySelectorAll(".pill").forEach((p) => {
+    p.classList.toggle("active", !!layers[p.dataset.layer]);
+  });
+}
+
+let bridge = null;
+function requestData() {
+  if (!bridge || suppressChange) return;
+  showStatus("Yükleniyor…");
+  bridge.requestData(el("symbol").value, el("interval").value);
+}
+el("symbol").addEventListener("change", requestData);
+el("interval").addEventListener("change", requestData);
+
+// ---- QWebChannel köprüsü ---------------------------------------------------
+function setLive(on, text) {
+  el("liveDot").classList.toggle("on", !!on);
+  el("liveText").textContent = text || (on ? "canlı" : "duraklatıldı");
+}
+
+new QWebChannel(qt.webChannelTransport, function (channel) {
+  bridge = channel.objects.bridge;
+  bridge.dataReady.connect(function (json) {
+    const d = JSON.parse(json);
+    if (d.pairs) fillPairs(d.pairs, d.symbol, d.interval);
+    applyFull(d);
+  });
+  bridge.liveUpdate.connect(function (json) { applyLive(JSON.parse(json)); });
+  bridge.liveState.connect(function (on, text) { setLive(on, text); });
+  syncPills();
+  bridge.ready();
+});
+</script>
+</body>
+</html>

@@ -13,6 +13,9 @@ from terminal.ui.styles import QSS
 
 def run_app() -> int:
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    # QtWebEngine (canlı grafik) için GL bağlamı paylaşımı QApplication'dan
+    # ÖNCE açılmalı.
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
     app.setApplicationName("terminalMiraz")
     app.setStyle("Fusion")

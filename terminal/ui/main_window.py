@@ -12,6 +12,7 @@ from terminal.ui.data_provider import DataProvider
 from terminal.ui.status_bar import StatusBar
 from terminal.ui.widgets.journal_tab import JournalTab
 from terminal.ui.widgets.karakter_tab import KarakterTab
+from terminal.ui.widgets.live_chart_tab import LiveChartTab
 from terminal.ui.widgets.potential_tab import PotentialTab
 from terminal.ui.widgets.results_tab import ResultsTab
 from terminal.ui.widgets.setups_tab import SetupsTab
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
 
         # Sekmeler
         self.setups_tab = SetupsTab(self.provider, only_open=True)
+        self.live_chart_tab = LiveChartTab(store)
         self.potential_tab = PotentialTab(store)
         self.trades_tab = TradesTab(store)
         self.results_tab = ResultsTab(self.provider)
@@ -51,6 +53,7 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(self.setups_tab, "Setup'lar (Aday / Aktif)")
+        tabs.addTab(self.live_chart_tab, "📈 Canlı Grafik")
         tabs.addTab(self.potential_tab, "🔮 Potansiyel")
         tabs.addTab(self.trades_tab, "💼 Tradeler")
         tabs.addTab(self.results_tab, "Sonuçlar")
@@ -87,6 +90,7 @@ class MainWindow(QMainWindow):
             self._check_db_changed(force=force)
             self.status_bar.update_counts(self.provider.status_counts())
             self.setups_tab.refresh()
+            self.live_chart_tab.refresh()
             self.potential_tab.refresh()
             self.trades_tab.refresh()
             self.results_tab.refresh()
@@ -120,4 +124,12 @@ class MainWindow(QMainWindow):
         self.potential_tab.store = self.store
         self.trades_tab.store = self.store
         self.journal_tab.store = self.store
+        self.live_chart_tab.set_store(self.store)
         self._last_db_mtime = mtime
+
+    def closeEvent(self, event) -> None:
+        try:
+            self.live_chart_tab.shutdown()
+        except Exception:
+            pass
+        super().closeEvent(event)
