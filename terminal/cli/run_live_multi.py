@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from terminal.cli.run_data import _normalize_interval
-from terminal.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from terminal.config import POLL_INTERVAL_SECONDS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from terminal.data.kline_poller import KlinePoller
 from terminal.data.mexc_client import MexcClient, MexcError
 from terminal.data.mexc_futures import MexcFuturesClient, MexcFuturesError
@@ -68,6 +68,7 @@ class PairWorker:
         use_futures: bool = False,
         paper_engine: "PaperEngine | None" = None,
         startup_delay: float = 0.0,
+        poll_seconds: int = POLL_INTERVAL_SECONDS,
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -84,6 +85,7 @@ class PairWorker:
         self.threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
         self.htf_interval = htf_for(interval) if use_htf else None
         self.startup_delay = startup_delay
+        self.poll_seconds = poll_seconds
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -385,7 +387,8 @@ class PairWorker:
             self.symbol, self.interval, self.store, on_transition=self._on_transition,
         )
         self.poller = KlinePoller(
-            self.symbol, self.interval, self.client, self.store, on_closed=self._process,
+            self.symbol, self.interval, self.client, self.store,
+            on_closed=self._process, poll_seconds=self.poll_seconds,
         )
         try:
             self.poller.bootstrap()
@@ -495,6 +498,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument("--stagger-ms", type=int, default=200,
                         help="Her worker arasında bekleme (ms). Bootstrap rate limit'i tampona alır.")
+    parser.add_argument("--poll-seconds", type=int, default=POLL_INTERVAL_SECONDS,
+                        help=f"Mum yoklama aralığı (sn, varsayılan {POLL_INTERVAL_SECONDS}). "
+                             "Çok kombinasyonda (örn. 250) rate limit için 30 önerilir.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -573,6 +579,7 @@ def main(argv: list[str] | None = None) -> int:
             zigzag_threshold=args.zigzag,
             use_futures=args.futures, paper_engine=paper_engine,
             startup_delay=idx * (args.stagger_ms / 1000.0),
+            poll_seconds=args.poll_seconds,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)
