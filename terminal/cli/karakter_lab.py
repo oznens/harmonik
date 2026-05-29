@@ -17,6 +17,7 @@ import sys
 
 from terminal.cli.run_data import _normalize_interval
 from terminal.data.mexc_client import MexcClient
+from terminal.data.mexc_futures import MexcFuturesClient
 from terminal.db.store import Store
 from terminal.karakter.runner import run_lab
 
@@ -36,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Her parite × TF için çekilecek mum (varsayılan 20.000)")
     parser.add_argument("--zigzag", type=float, default=None,
                         help="Özel ZigZag eşiği; yoksa TF varsayılanı")
+    parser.add_argument("--spot", action="store_true",
+                        help="Spot verisi kullan (varsayılan: FUTURES — canlı ile aynı)")
     parser.add_argument("--log-level", default="WARNING")
     args = parser.parse_args(argv)
 
@@ -57,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     def progress(msg: str) -> None:
         print(f"  {msg}", flush=True)
 
-    client = MexcClient()
+    # Varsayılan FUTURES — canlı sistemle aynı veri kaynağı (global throttle'lı).
+    client = MexcClient() if args.spot else MexcFuturesClient()
     store = Store()
     try:
         if not client.ping():

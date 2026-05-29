@@ -56,8 +56,9 @@ def run_lab(
     total_combos = len(symbols) * len(intervals)
     combo_idx = 0
     total_samples = 0
-    portfolio_trades: list[dict[str, Any]] = []  # ANINDA giriş (mevcut canlı kural)
-    portfolio_trades_confirm: list[dict[str, Any]] = []  # ONAYLI giriş (BOS) karşılaştırma
+    portfolio_trades: list[dict[str, Any]] = []  # ANINDA giriş (market, sonraki bar)
+    portfolio_trades_limit: list[dict[str, Any]] = []  # LİMİT giriş (entry fiyatından)
+    portfolio_trades_confirm: list[dict[str, Any]] = []  # ONAYLI giriş (BOS)
 
     for symbol in symbols:
         for interval in intervals:
@@ -167,21 +168,22 @@ def run_lab(
                         "confluence": s.confluence_score or 0,
                     })
 
-                # ONAYLI giriş (BOS) varyantı — aynı setup, farklı giriş kuralı.
-                # Karşılaştırma: anında giriş vs onay-bekleyen giriş hangisi daha iyi?
+                # Karşılaştırma varyantları (aynı setup, farklı giriş kuralı).
                 if not s.elenen:
-                    oc = simulate_outcome(s, future, entry_mode="confirm")
-                    if oc.entered_price is not None and oc.exited_time is not None:
-                        portfolio_trades_confirm.append({
-                            "symbol": s.symbol, "interval": s.interval,
-                            "pattern": s.pattern_name, "direction": s.direction,
-                            "ideal_entry": s.entry, "stop": s.stop, "tp1": s.tp1,
-                            "fill": oc.entered_price,
-                            "open_time": oc.entered_time,
-                            "close_time": oc.exited_time,
-                            "outcome": oc.outcome,
-                            "confluence": s.confluence_score or 0,
-                        })
+                    for mode, bucket in (("limit", portfolio_trades_limit),
+                                         ("confirm", portfolio_trades_confirm)):
+                        ov = simulate_outcome(s, future, entry_mode=mode)
+                        if ov.entered_price is not None and ov.exited_time is not None:
+                            bucket.append({
+                                "symbol": s.symbol, "interval": s.interval,
+                                "pattern": s.pattern_name, "direction": s.direction,
+                                "ideal_entry": s.entry, "stop": s.stop, "tp1": s.tp1,
+                                "fill": ov.entered_price,
+                                "open_time": ov.entered_time,
+                                "close_time": ov.exited_time,
+                                "outcome": ov.outcome,
+                                "confluence": s.confluence_score or 0,
+                            })
 
             if progress:
                 progress(f"{tag} — tamam.")
@@ -196,15 +198,14 @@ def run_lab(
                 format_confluence_sweep, format_portfolio_summary,
                 simulate_portfolio,
             )
-            result = simulate_portfolio(portfolio_trades)
-            progress("ANINDA GİRİŞ (mevcut canlı kural):")
-            progress(format_portfolio_summary(result))
-            # ONAYLI giriş (BOS) karşılaştırması — fakeout filtresi işe yarıyor mu?
-            result_conf = simulate_portfolio(portfolio_trades_confirm)
+            progress("ANINDA GİRİŞ (market, sonraki bar açılışı):")
+            progress(format_portfolio_summary(simulate_portfolio(portfolio_trades)))
+            progress("LİMİT GİRİŞ (entry fiyatından; değmezse dolmaz):")
+            progress(format_portfolio_summary(simulate_portfolio(portfolio_trades_limit)))
             progress("ONAYLI GİRİŞ (BOS — D'den sonra yapı kırılımı bekle):")
-            progress(format_portfolio_summary(result_conf))
-            # Confluence eşiği taraması (anında giriş seti üzerinde)
-            progress(format_confluence_sweep(portfolio_trades))
+            progress(format_portfolio_summary(simulate_portfolio(portfolio_trades_confirm)))
+            # Confluence eşiği taraması (LİMİT giriş seti üzerinde — yeni varsayılan)
+            progress(format_confluence_sweep(portfolio_trades_limit))
         except Exception as e:  # özet başarısız olsa da lab sonucu kaybolmasın
             log.warning("portföy simülasyonu hatası: %s", e)
         progress(f"Lab tamamlandı: {total_samples} örneklem, run_id={run_id}")
