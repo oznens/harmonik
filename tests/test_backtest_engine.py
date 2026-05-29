@@ -3,11 +3,63 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from terminal.backtest.engine import load_db_klines, run_backtest
+from terminal.backtest.engine import _pivot_points, load_db_klines, run_backtest
+from terminal.detection.models import Pivot
 from terminal.db.store import Store
 from tests.synthetic import gartley_bull, make_xabcd_klines
 
 MS = 3_600_000
+
+
+class _FakeSetup:
+    """_pivot_points sadece .pivots'a bakar; tam Setup kurmaya gerek yok."""
+    def __init__(self, pivots):
+        self.pivots = pivots
+
+
+def test_pivot_points_dedup_abcd_x_equals_a():
+    """AB=CD'de X slotu A'nın kopyasıdır (aynı bar). _pivot_points bunu zaman
+    bazında tekillemeli — yoksa çizimde yinelenen zaman lightweight-charts
+    setData'yı patlatıp tüm backtest render'ını boş bırakıyordu.
+    """
+    a = Pivot(index=0, time=1_000_000, price=100.0, kind="L")  # X==A aynı pivot
+    pivots = {
+        "X": a, "A": a,
+        "B": Pivot(index=3, time=1_000_000 + 3 * MS, price=104.0, kind="H"),
+        "C": Pivot(index=6, time=1_000_000 + 6 * MS, price=102.0, kind="L"),
+        "D": Pivot(index=9, time=1_000_000 + 9 * MS, price=106.0, kind="H"),
+    }
+    pts = _pivot_points(_FakeSetup(pivots))
+    times = [p["time"] for p in pts]
+    assert times == sorted(set(times))            # artan + benzersiz (LWC güvenli)
+    assert len(pts) == 4                          # X ve A tek noktaya indi
+    assert pts[0]["label"] == "A"                 # AB=CD başlangıcı 'A' etiketli (X değil)
+    assert [p["label"] for p in pts] == ["A", "B", "C", "D"]
+
+
+def test_run_backtest_abcd_pivots_lwc_safe():
+    """include_abcd=True'da bile her işlemin pivot zamanları artan + benzersiz
+    olmalı (AB=CD setupları render'ı kırmasın)."""
+    import math, random
+    random.seed(7)
+    bars = []
+    t0, step, price = 1_700_000_000_000, MS, 100.0
+    for i in range(2000):
+        price = max(1.0, price + math.sin(i / 23.0) * 1.5 + math.sin(i / 7.0) * 0.6
+                    + random.uniform(-1.2, 1.2))
+        o = price
+        c = price + random.uniform(-0.8, 0.8)
+        ot = t0 + i * step
+        bars.append({"open_time": ot, "close_time": ot + step - 1, "open": o,
+                     "high": max(o, c) + random.uniform(0, 0.9),
+                     "low": min(o, c) - random.uniform(0, 0.9), "close": c,
+                     "volume": 100.0, "quote_volume": 1e4})
+    r = run_backtest(bars, "TESTUSDT", "60m", entry_mode="market",
+                     target_mode="structural", include_abcd=True, min_rr=0.0)
+    assert any("AB=CD" in t["pattern"] for t in r.trades)   # AB=CD gerçekten üretildi
+    for t in r.trades:
+        times = [p["time"] for p in t["pivots"]]
+        assert times == sorted(set(times)), f"{t['pattern']} pivot zamanı bozuk: {times}"
 
 
 def test_load_db_klines_chronological(tmp_path: Path):

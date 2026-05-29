@@ -45,6 +45,26 @@ def _exit_price(setup, outcome: str) -> float:
     return {"TP": setup.tp1, "STOP": setup.stop}.get(outcome, setup.entry)
 
 
+def _pivot_points(setup) -> list[dict[str, Any]]:
+    """XABCD pivotlarını lightweight-charts'a GÜVENLİ (artan + benzersiz zamanlı)
+    nokta listesine çevir.
+
+    AB=CD ailesinde X slotuna A'nın kopyası konur (X==A, aynı bar). Bu, çizim
+    serisinde yinelenen zamana yol açıp LWC `setData`'yı — dolayısıyla TÜM
+    render'ı — sessizce patlatıyordu (UI'da "1-2 sn durup boş geçer" hatası).
+    Aynı bara düşen pivotları zaman bazında tekille (son etiket kazanır →
+    AB=CD'de 'A' gösterilir) ve zamana göre sırala.
+    """
+    by_time: dict[int, dict[str, Any]] = {}
+    for letter in _PIVOT_LETTERS:
+        p = setup.pivots.get(letter)
+        if p is None:
+            continue
+        ts = _sec(p.time)
+        by_time[ts] = {"time": ts, "value": p.price, "label": letter}
+    return sorted(by_time.values(), key=lambda d: d["time"])
+
+
 def load_db_klines(store, symbol: str, interval: str, limit: int) -> list[dict[str, Any]]:
     """DB klines tablosundan son `limit` mumu kronolojik döner (backtest verisi).
 
@@ -120,13 +140,6 @@ def run_backtest(
 
     pf = simulate_portfolio(raw_trades)
 
-    def _pivots(s) -> list[dict[str, Any]]:
-        out = []
-        for letter in _PIVOT_LETTERS:
-            p = s.pivots.get(letter)
-            if p is not None:
-                out.append({"time": _sec(p.time), "value": p.price, "label": letter})
-        return out
 
     # Portföyün GERÇEKTEN aldığı işlemleri (pf.closed) pivotlarıyla TAM çiz
     trades: list[dict[str, Any]] = []
@@ -140,7 +153,7 @@ def run_backtest(
         trades.append({
             "pattern": s.pattern_name, "direction": s.direction,
             "outcome": c["outcome"], "pnl": c["pnl"], "faint": False,
-            "pivots": _pivots(s),
+            "pivots": _pivot_points(s),
             "entry": {"time": _sec(o.entered_time), "price": o.entered_price},
             "exit": {"time": _sec(o.exited_time or 0),
                      "price": _exit_price(s, c["outcome"])},
@@ -159,7 +172,7 @@ def run_backtest(
         trades.append({
             "pattern": s.pattern_name, "direction": s.direction,
             "outcome": o.outcome, "pnl": 0.0, "faint": True,
-            "pivots": _pivots(s),
+            "pivots": _pivot_points(s),
             "stop": s.stop, "tp1": s.tp1, "entry_level": s.entry,
         })
 

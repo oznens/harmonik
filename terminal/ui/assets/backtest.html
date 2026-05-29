@@ -164,7 +164,13 @@ el("run").addEventListener("click", runBacktest);
 
 new QWebChannel(qt.webChannelTransport, function(channel){
   bridge = channel.objects.bridge;
-  bridge.resultReady.connect(function(json){ el("run").disabled=false; render(JSON.parse(json)); });
+  bridge.resultReady.connect(function(json){
+    el("run").disabled=false;
+    // render içinde bir hata (ör. lightweight-charts setData) tüm çizimi sessizce
+    // iptal edip ekranı boş bırakırdı — hatayı durum çubuğunda göster.
+    try { render(JSON.parse(json)); }
+    catch(e){ showStatus("Çizim hatası: " + ((e && e.message) || e)); console.error("render:", e); }
+  });
   bridge.failed.connect(function(msg){ el("run").disabled=false; showStatus("Hata: "+msg); });
   bridge.ready();
 });
