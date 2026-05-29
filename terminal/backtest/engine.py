@@ -45,6 +45,24 @@ def _exit_price(setup, outcome: str) -> float:
     return {"TP": setup.tp1, "STOP": setup.stop}.get(outcome, setup.entry)
 
 
+def load_db_klines(store, symbol: str, interval: str, limit: int) -> list[dict[str, Any]]:
+    """DB klines tablosundan son `limit` mumu kronolojik döner (backtest verisi).
+
+    download_history ile doldurulur. Boşsa [] döner (çağıran canlı çekebilir).
+    """
+    rows = store._conn.execute(
+        """SELECT open_time, close_time, open, high, low, close, volume, quote_volume
+           FROM klines WHERE symbol = ? AND interval = ?
+           ORDER BY open_time DESC LIMIT ?""",
+        (symbol, interval, limit),
+    ).fetchall()
+    return [
+        {"open_time": r[0], "close_time": r[1], "open": r[2], "high": r[3],
+         "low": r[4], "close": r[5], "volume": r[6], "quote_volume": r[7]}
+        for r in reversed(rows)
+    ]
+
+
 def run_backtest(
     klines: list[dict[str, Any]],
     symbol: str,

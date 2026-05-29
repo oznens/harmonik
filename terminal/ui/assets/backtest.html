@@ -127,7 +127,8 @@ function render(d){
     `<span><span class="k">P&L</span> ${sign}$${(s.total_pnl||0).toFixed(0)} (${sign}${(s.pnl_pct||0).toFixed(1)}%)</span>`+
     `<span><span class="k">maxDD</span> ${(s.max_drawdown_pct||0).toFixed(1)}%</span>`+
     `<span><span class="k">TP/STOP</span> ${s.tp||0}/${s.stop||0}</span>`+
-    `<span><span class="k">setup</span> ${s.n_setups||0}</span>`;
+    `<span><span class="k">setup</span> ${s.n_setups||0}</span>`+
+    `<span><span class="k">kaynak</span> ${d.source||"-"} (${d.bars_used||s.n_candles||0} mum)</span>`;
 }
 
 let bridge = null;

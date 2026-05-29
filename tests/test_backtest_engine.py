@@ -1,10 +1,27 @@
 """Görsel backtest motoru (run_backtest) testleri — saf, UI'siz."""
 from __future__ import annotations
 
-from terminal.backtest.engine import run_backtest
+from pathlib import Path
+
+from terminal.backtest.engine import load_db_klines, run_backtest
+from terminal.db.store import Store
 from tests.synthetic import gartley_bull, make_xabcd_klines
 
 MS = 3_600_000
+
+
+def test_load_db_klines_chronological(tmp_path: Path):
+    s = Store(path=tmp_path / "t.db")
+    kl = [{"open_time": 1000 + i, "close_time": 1000 + i, "open": 1.0, "high": 1.0,
+           "low": 1.0, "close": 1.0, "volume": 1.0, "quote_volume": 1.0} for i in range(50)]
+    s.upsert_klines("BTCUSDT", "60m", kl)
+    out = load_db_klines(s, "BTCUSDT", "60m", limit=10)
+    assert len(out) == 10
+    # En son 10 mum, kronolojik (artan open_time)
+    assert out[0]["open_time"] < out[-1]["open_time"]
+    assert out[-1]["open_time"] == 1049
+    assert load_db_klines(s, "YOKUSDT", "60m", limit=10) == []   # veri yok → boş
+    s.close()
 
 
 def _klines_with_tp_tail():

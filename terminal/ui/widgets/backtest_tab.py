@@ -15,8 +15,10 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from terminal.backtest.engine import run_backtest
+from terminal.backtest.engine import load_db_klines, run_backtest
+from terminal.config import DB_PATH
 from terminal.data.mexc_futures import MexcFuturesClient
+from terminal.db.store import Store
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +79,8 @@ class BacktestTab(QWidget):
         super().__init__(parent)
         self._pool = QThreadPool.globalInstance()
         self._tasks: set[_Task] = set()
+        # Worker thread kendi Store bağlantısını açar (cross-thread güvenli)
+        self._db_path = str(store.path) if store is not None else str(DB_PATH)
 
         self.view = QWebEngineView(self)
         self.bridge = BacktestBridge()
@@ -104,16 +108,30 @@ class BacktestTab(QWidget):
         bars = min(_MAX_BARS, max(200, days * _BARS_PER_DAY.get(interval, 24)))
 
         def work():
-            client = MexcFuturesClient()
+            store = Store(self._db_path)   # worker thread'e ait bağlantı
+            source = "DB"
             try:
-                klines = client.klines_paginated(symbol, interval, bars, throttle=0.08)
+                klines = load_db_klines(store, symbol, interval, bars)
+                # DB yetersizse canlı çek + cache'le (sonraki koşum DB'den hızlı)
+                if len(klines) < max(100, int(bars * 0.6)):
+                    client = MexcFuturesClient()
+                    try:
+                        klines = client.klines_paginated(symbol, interval, bars, throttle=0.08)
+                    finally:
+                        try:
+                            client.close()
+                        except Exception:
+                            pass
+                    if klines:
+                        store.upsert_klines(symbol, interval, klines)
+                    source = "canlı+cache"
             finally:
-                try:
-                    client.close()
-                except Exception:
-                    pass
+                store.close()
             result = run_backtest(klines, symbol, interval, entry_mode=mode)
-            return json.dumps(result.to_payload())
+            payload = result.to_payload()
+            payload["source"] = source
+            payload["bars_used"] = len(klines)
+            return json.dumps(payload)
 
         self._run(
             work,
