@@ -138,3 +138,99 @@ def check_choch(
                     confirm_time=klines[j]["open_time"], confirm_close=c,
                 )
     return ChochResult(confirmed=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Price Action / SMC bölge detektörleri (#4 Order Block · #5 FVG · #6 Sweep)
+# Hepsi aynı zaman diliminde, D pivotunun SOLUNDAKİ mumlarla çalışır — yeni veri
+# altyapısı gerektirmez. {"type": "bull"/"bear", "top", "bottom", "index"} döner.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def find_fair_value_gaps(
+    klines: list[dict[str, Any]], lookback: int | None = None
+) -> list[dict[str, Any]]:
+    """Fair Value Gap (FVG / Imbalance) bölgeleri — ardışık 3 mumda fiyat boşluğu.
+
+    Bull FVG: 1. mumun high'ı 3. mumun low'undan KÜÇÜK (arada boşluk) →
+      bottom=high[i-1], top=low[i+1]. Bear FVG: 1. mumun low'u 3. mumun
+      high'ından BÜYÜK → top=low[i-1], bottom=high[i+1]. i = ortadaki mum.
+
+    Fiyat bu verimsiz boşlukları "doldurma" eğilimindedir (mıknatıs). Harmonik
+    D noktası dolmamış bir FVG'nin içine denk geliyorsa dönüş ihtimali artar.
+    """
+    out: list[dict[str, Any]] = []
+    n = len(klines)
+    start = 1 if lookback is None else max(1, n - lookback)
+    for i in range(start, n - 1):
+        prev, nxt = klines[i - 1], klines[i + 1]
+        if prev["high"] < nxt["low"]:
+            out.append({"type": "bull", "bottom": prev["high"],
+                        "top": nxt["low"], "index": i})
+        elif prev["low"] > nxt["high"]:
+            out.append({"type": "bear", "top": prev["low"],
+                        "bottom": nxt["high"], "index": i})
+    return out
+
+
+def find_order_blocks(
+    klines: list[dict[str, Any]],
+    displacement: int = 3,
+    lookback: int | None = None,
+) -> list[dict[str, Any]]:
+    """Order Block (kurumsal emir bloğu) bölgeleri.
+
+    Bull OB: sert bir yükselişten ÖNCEKİ son DÜŞÜŞ (kırmızı) mumu. Kural:
+      kırmızı mum (close<open) + sonraki `displacement` mum içinde fiyat o mumun
+      HIGH'ını kapanışla yukarı kırar (displacement/BOS) ve net yükseliş var →
+      kutu = [low, high]. Bear OB: yeşil mum + sonraki mumlarda low aşağı kırılır.
+
+    Harmonik D noktası geçmiş bir OB ile çakışıyorsa = "Fibonacci + kurumsal
+    bölge" kesişimi → güçlü.
+    """
+    out: list[dict[str, Any]] = []
+    n = len(klines)
+    start = 0 if lookback is None else max(0, n - lookback)
+    for i in range(start, n - displacement):
+        o, c = klines[i]["open"], klines[i]["close"]
+        hi, lo = klines[i]["high"], klines[i]["low"]
+        nxt = klines[i + 1: i + 1 + displacement]
+        if c < o:  # kırmızı → bull OB adayı
+            broke = any(b["close"] > hi for b in nxt)
+            ups = sum(1 for b in nxt if b["close"] > b["open"])
+            if broke and ups >= 1:
+                out.append({"type": "bull", "top": hi, "bottom": lo, "index": i})
+        elif c > o:  # yeşil → bear OB adayı
+            broke = any(b["close"] < lo for b in nxt)
+            downs = sum(1 for b in nxt if b["close"] < b["open"])
+            if broke and downs >= 1:
+                out.append({"type": "bear", "top": hi, "bottom": lo, "index": i})
+    return out
+
+
+def check_liquidity_sweep(
+    klines: list[dict[str, Any]],
+    d_index: int,
+    side: str,
+    lookback: int = 50,
+) -> bool:
+    """D barında likidite alımı (stop avı / sweep) oldu mu?
+
+    Bull: D barı, soldaki en yakın belirgin dibin (old_low) ALTINA iğne atar
+    ama gövdeyi (close) o dibin ÜZERİNDE kapatır → aşağıdaki stoplar patlatıldı,
+    fiyat geri toplandı (en güçlü dönüş sinyali). Bear: old_high üstüne iğne,
+    altında kapanış.
+    """
+    bull = side.lower() in ("bull", "buy")
+    if d_index <= 0 or d_index >= len(klines):
+        return False
+    lo = max(0, d_index - lookback)
+    hist = klines[lo:d_index]
+    if not hist:
+        return False
+    d = klines[d_index]
+    if bull:
+        old_low = min(k["low"] for k in hist)
+        return d["low"] < old_low and d["close"] > old_low
+    old_high = max(k["high"] for k in hist)
+    return d["high"] > old_high and d["close"] < old_high

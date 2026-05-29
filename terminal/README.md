@@ -263,6 +263,9 @@ opsiyonel Price Action / yapısal onaylar eklenir (detay: `notlar/13-price-actio
 - `--ltf-choch` — #3: ALT TF'de (1H→5M, 4H→15M) CHoCH/MSB onayı yoksa paper'a
   açma. En iyi `--paper-entry-mode limit` ile çalışır. Backtest tarafı:
   `simulate_outcome(..., entry_mode="choch", ltf_klines=...)`.
+- `--min-smc X` — #4-6: D noktası SMC bölge skoru (Order Block 40 + FVG 30 +
+  Liquidity Sweep 30) < X → paper'a açma. 30=en az bir bölge onayı. Backtest
+  sweep: `format_smc_sweep(trades)`.
 
 **Outcome denetim arayüzü (UI):**
 

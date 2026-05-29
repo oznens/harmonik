@@ -14,17 +14,17 @@ mekanik kurallarla doğrulamasını şart koşarız.
 ```
 [1] HARMONİK TARAYICI   → XABCD bulundu, D noktası (PRZ) belirlendi
         │
-[2] PA BÖLGE FİLTRESİ   → D, kurumsal bir bölgeyle çakışıyor mu?
-        │  (Order Block · FVG · Liquidity Sweep — aynı TF, sonraki PR'lar)
+[2] PA BÖLGE FİLTRESİ   → D, kurumsal bir bölgeyle çakışıyor mu?  ← #4-6
+        │  (Order Block · FVG · Liquidity Sweep — aynı TF, --min-smc)
         ▼
-[3] GİRİŞ ONAYI         → ALT TF'de (LTF) yön gerçekten döndü mü?  ← BU DOSYA
-        │  (CHoCH / MSB)
+[3] GİRİŞ ONAYI         → ALT TF'de (LTF) yön gerçekten döndü mü?  ← #3
+        │  (CHoCH / MSB, --ltf-choch)
         ▼
      İŞLEME GİR
 ```
 
-Bu dosya **#3 — CHoCH/MSB (giriş onayı)** katmanını tanımlar. Order Block, FVG
-ve Liquidity Sweep katmanları sonraki adımlarda eklenecek (aynı kalıp).
+Bu dosya **#3 — CHoCH/MSB (giriş onayı)** ve **#4-6 — SMC bölge filtreleri
+(Order Block · FVG · Liquidity Sweep)** katmanlarını tanımlar. Hepsi uygulandı.
 
 ---
 
@@ -104,12 +104,36 @@ python -m terminal.cli.run_live_multi \
 
 ---
 
-## Sıradaki katmanlar (yol haritası)
+---
 
-- **#4 Order Block:** D, geçmişteki son ters-yön kurumsal mum bloğuyla çakışıyor mu.
-- **#5 FVG / Imbalance:** D, dolmamış bir fiyat boşluğunun (mıknatıs) içinde mi.
-- **#6 Liquidity Sweep:** D barı, soldaki bir dip/tepenin likiditesini iğneyle
-  temizleyip gövdeyi geri kapattı mı (stop avı).
+## #4-6 — SMC Bölge Filtreleri (aynı TF, --min-smc)
 
-Hepsi aynı-TF çalışır (yeni veri altyapısı gerektirmez) ve `confluence` kalıbında
-0-100 skor + backtest sweep + canlı gate olarak eklenecek.
+Harmonik D noktası sadece Fibonacci'ye değil, **kurumsal iz bölgelerine** de denk
+geliyorsa dönüş ihtimali artar. Üç bağımsız sinyal 0-100 skorda birleşir
+(`quality/smc.py` → `compute_smc`); hepsi D'nin SOLUNDAKİ aynı-TF mumlarla çalışır
+(yeni veri altyapısı gerektirmez).
+
+| # | Sinyal | Puan | Kural (bull) |
+|---|--------|------|--------------|
+| #4 | **Order Block** | 40 | D, geçmiş bir bull OB kutusunun içinde. OB = sert yükselişten önceki son kırmızı mum (sonraki mumlar high'ı kapanışla kırar). |
+| #5 | **FVG / Imbalance** | 30 | D, dolmamış bull FVG'nin içinde. FVG = ardışık 3 mumda boşluk (high[i-1] < low[i+1]). |
+| #6 | **Liquidity Sweep** | 30 | D barı soldaki dibin altına iğne atıp gövdeyi üstünde kapatır (stop avı). |
+
+Eşik mantığı: `--min-smc 30` = en az bir bölge onayı (yol haritasının "EN AZ
+BİRİ" kuralı), `60` = en az iki, `100` = üçü birden.
+
+**Kodda:** `detection/structure.py` → `find_order_blocks()`, `find_fair_value_gaps()`,
+`check_liquidity_sweep()`. `quality/smc.py` → `compute_smc()` (0-100 + bileşen).
+`scanner.py` → `_apply_smc()` her setup'a yazar (`Setup.smc_score`).
+`karakter/portfolio.py` → `format_smc_sweep()` eşik taraması.
+`cli/run_live_multi.py` → `--min-smc` paper AKTIF kapısı.
+Testler: `tests/test_smc.py`.
+
+```bash
+# Canlı: en az bir kurumsal bölge onayı olmadan paper açma
+python -m terminal.cli.run_live_multi --symbols BTCUSDT --intervals 60m,4h \
+    --paper --min-smc 30 --ltf-choch     # #4-6 + #3 birlikte
+```
+
+> Hepsi `confluence` kalıbındadır: önce backtest `format_smc_sweep` ile ölç,
+> edge görülen eşikte canlıda aç.

@@ -227,3 +227,35 @@ def format_symmetry_sweep(
     if best:
         lines.append(f"→ En yüksek P&L: simetri >= {best[0]:.2f}")
     return "\n".join(lines)
+
+
+def format_smc_sweep(
+    trades: list[dict[str, Any]],
+    thresholds: tuple[int, ...] = (0, 30, 40, 60, 70, 100),
+    **sim_kwargs: Any,
+) -> str:
+    """SMC bölge skoru eşiğini tara (trade'leri 'smc' alanına göre süzerek).
+
+    #4-6 yapısal filtrenin (Order Block + FVG + Liquidity Sweep) WR/P&L'i
+    gerçekten iyileştirip iyileştirmediğini tek backtest'te gösterir.
+    Eşik: 30 = en az bir bölge onayı, 60 = en az iki, 100 = üçü birden.
+    """
+    lines = [
+        "",
+        "═══ SMC BÖLGE EŞİĞİ TARAMASI (portföy, canlı kurallar) ═══",
+        f"{'eşik':>6s} {'işlem':>6s} {'WR':>7s} {'P&L':>11s} {'P&L%':>8s} {'maxDD':>7s}",
+    ]
+    best = None
+    for th in thresholds:
+        subset = [t for t in trades if t.get("smc", 0) >= th]
+        if not subset:
+            lines.append(f">={th:<4d}   (işlem yok)")
+            continue
+        r = simulate_portfolio(subset, **sim_kwargs)
+        lines.append(f">={th:<4d} {r.n_trades:6d} {r.win_rate:6.1f}% "
+                     f"{r.total_pnl:+10.2f} {r.pnl_pct:+7.1f}% {r.max_drawdown_pct:6.1f}%")
+        if best is None or r.total_pnl > best[1]:
+            best = (th, r.total_pnl)
+    if best:
+        lines.append(f"→ En yüksek P&L: smc >= {best[0]}")
+    return "\n".join(lines)

@@ -108,6 +108,7 @@ def run_backtest(
             "tp1": s.tp1, "fill": o.entered_price, "open_time": o.entered_time,
             "close_time": o.exited_time, "outcome": o.outcome,
             "confluence": s.confluence_score or 0,
+            "smc": s.smc_score or 0,
         })
         # Birden çok setup aynı bara girebilir; portföy parite-başı-tek ile birini
         # alır. Çizim için open_time → setup eşle (ilk gelen yeter).

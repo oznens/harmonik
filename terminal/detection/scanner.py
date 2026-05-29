@@ -21,6 +21,7 @@ from terminal.detection.prz import compute_prz, compute_trade_levels
 from terminal.quality.confluence import compute_confluence
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
 from terminal.quality.score import compute_q
+from terminal.quality.smc import compute_smc
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ def scan_klines(
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
+        _apply_smc(setup, klines)
         setups.append(setup)
         seen_keys.add((m.spec.name, q.x.time, q.a.time, q.b.time, q.c.time, q.d.time))
 
@@ -130,6 +132,7 @@ def scan_klines(
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
+        _apply_smc(setup, klines)
         setups.append(setup)
 
     # 3) 5-pivot pencerelerde Shark (0-X-A-B-C, farklı kural)
@@ -151,6 +154,7 @@ def scan_klines(
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
+        _apply_smc(setup, klines)
         setups.append(setup)
 
     # 4) 5-pivot pencerelerde Cypher (X-A-B-C-D, C XA extension'ı)
@@ -172,6 +176,7 @@ def scan_klines(
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
+        _apply_smc(setup, klines)
         setups.append(setup)
 
     # PDF kapsamı dışı: 5-0 ve Three Drives pattern detection devre dışı.
@@ -273,3 +278,10 @@ def _apply_confluence(setup: Setup, klines: list[dict[str, Any]]) -> None:
     setup.confluence_components = cr.components
     setup.rsi_at_d = cr.rsi_at_d
     setup.volume_ratio = cr.volume_ratio
+
+
+def _apply_smc(setup: Setup, klines: list[dict[str, Any]]) -> None:
+    """Setup'a SMC bölge skorunu ekle (#4 OB + #5 FVG + #6 Sweep). klines D dahil."""
+    sr = compute_smc(setup, klines)
+    setup.smc_score = sr.score
+    setup.smc_components = sr.components

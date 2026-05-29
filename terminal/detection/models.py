@@ -53,6 +53,11 @@ class Setup:
     rsi_at_d: float | None = None                     # D pivot anındaki RSI(14)
     volume_ratio: float | None = None                 # D barı / 20-bar avg
 
+    # SMC bölge skoru (#4 Order Block + #5 FVG + #6 Liquidity Sweep, 0-100).
+    # D noktasının kurumsal bölgelerle çakışması; --min-smc kapısı ile süzülür.
+    smc_score: int = 0
+    smc_components: dict[str, float] = field(default_factory=dict)
+
     # Pattern ailesi: "xabcd" (Gartley/Bat/Crab/Butterfly), "abcd" (4-nokta),
     # "shark" (0-X-A-B-C), "five_zero" (X-A-B-C-D farklı kural),
     # "three_drives" (D1-R1-D2-R2-D3). UI/chart bu alana göre render eder.

@@ -81,6 +81,7 @@ class PairWorker:
         paper_entry_mode: str = "market",
         min_time_symmetry: float = 0.0,
         ltf_choch: bool = False,
+        min_smc: int = 0,
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -111,6 +112,8 @@ class PairWorker:
         # (AKTIF = fiyat PRZ'ye değdi → LTF'de birkaç onay barı oluşmuş olur).
         self.ltf_choch = ltf_choch
         self.ltf_interval = ltf_for(interval) if ltf_choch else None
+        # Yapısal filtre #4-6: SMC bölge skoru < eşik → paper'a açma (0=kapalı).
+        self.min_smc = min_smc
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -176,6 +179,12 @@ class PairWorker:
                         log.info("%s [AKTIF] %s simetri=%.2f < %.2f → paper'a açma",
                                  self._tag, t.setup.pattern_name, sym, self.min_time_symmetry)
                         return
+                # Yapısal filtre #4-6: SMC bölge skoru (Order Block + FVG + Sweep)
+                if self.min_smc > 0 and (t.setup.smc_score or 0) < self.min_smc:
+                    log.info("%s [AKTIF] %s smc=%d < %d → paper'a açma",
+                             self._tag, t.setup.pattern_name,
+                             t.setup.smc_score or 0, self.min_smc)
+                    return
                 # Yapısal filtre #3: ALT TF CHoCH onayı (Price Action giriş onayı)
                 if self.ltf_choch and not self._choch_confirmed(t.setup):
                     log.info("%s [AKTIF] %s CHoCH onayı yok (%s) → paper'a açma",
@@ -618,6 +627,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Yapısal filtre #3 (Price Action): ALT TF'de (1H→5M, 4H→15M) "
                              "CHoCH/MSB onayı olmadan paper'a açma. En iyi --paper-entry-mode "
                              "limit ile çalışır (AKTIF = fiyat PRZ'ye değdi).")
+    parser.add_argument("--min-smc", type=int, default=0,
+                        help="Yapısal filtre #4-6 (SMC): D noktası bölge skoru < eşik → "
+                             "paper'a açma (0=kapalı). 30=en az bir bölge (OB/FVG/Sweep), "
+                             "60=en az iki, 100=üçü birden. Backtest sweep'ine göre ayarla.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -701,6 +714,7 @@ def main(argv: list[str] | None = None) -> int:
             paper_entry_mode=args.paper_entry_mode,
             min_time_symmetry=args.min_time_symmetry,
             ltf_choch=args.ltf_choch,
+            min_smc=args.min_smc,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)
