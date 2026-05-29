@@ -256,6 +256,14 @@ Her (parite, TF) kombinasyonu kendi thread'inde çalışır:
 **MEXC rate limit notu:** 75 parite × 4 TF = 300 worker, her biri 10sn polling → ~30 istek/sn.
 MEXC public limit ~20/sn. 50+ parite için poll periyodunu artırmak veya parite/TF sayısını azaltmak gerekebilir.
 
+**Yapısal filtreler (paper giriş kapıları):** Harmonik tarama 1. katman; altına
+opsiyonel Price Action / yapısal onaylar eklenir (detay: `notlar/13-price-action-smc.md`).
+
+- `--min-time-symmetry X` — #2: AB/CD süre simetrisi < X → paper'a açma.
+- `--ltf-choch` — #3: ALT TF'de (1H→5M, 4H→15M) CHoCH/MSB onayı yoksa paper'a
+  açma. En iyi `--paper-entry-mode limit` ile çalışır. Backtest tarafı:
+  `simulate_outcome(..., entry_mode="choch", ltf_klines=...)`.
+
 **Outcome denetim arayüzü (UI):**
 
 Detay panelinde her setup için outcome düzeltme butonları (TP / STOP / EO / ZI / Aday / Aktif). Düzeltme nedeniyle birlikte `outcome_overrides` tablosuna audit kaydı yazılır; aynı setup birden fazla kez düzeltilebilir, tüm geçmiş paneldeki "Manuel Düzeltmeler" bölümünde görünür.

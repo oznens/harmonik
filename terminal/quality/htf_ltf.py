@@ -19,10 +19,31 @@ HTF_MAPPING: dict[str, str] = {
     "1d":  "1W",
 }
 
+# Setup TF → ALT zaman dilimi (LTF) eşleştirmesi — CHoCH/MSB giriş onayı için.
+# Mantık: onay her zaman setup TF'sinin ~1/3–1/12'sinde aranır (1H→5M, 4H→15M).
+# Harmonik üst TF'de bulunur; girişi alt TF'deki yapı kırılımı doğrular.
+LTF_MAPPING: dict[str, str] = {
+    "15m": "5m",
+    "30m": "5m",
+    "60m": "5m",    # 1H harmonik → 5M onayı
+    "4h":  "15m",   # 4H harmonik → 15M onayı
+    "1d":  "60m",
+    "1W":  "4h",
+}
+
 
 def htf_for(interval: str) -> str | None:
     """Verilen LTF için HTF aralığını döner (yoksa None)."""
     return HTF_MAPPING.get(interval)
+
+
+def ltf_for(interval: str) -> str | None:
+    """Verilen setup TF için CHoCH onayının aranacağı ALT zaman dilimini döner.
+
+    1H→5M, 4H→15M gibi. Eşleşme yoksa (örn. 1m, 5m çok küçük) None döner →
+    CHoCH onayı uygulanmaz.
+    """
+    return LTF_MAPPING.get(interval)
 
 
 def _ema(values: list[float], period: int) -> list[float]:

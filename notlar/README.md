@@ -27,6 +27,7 @@ Bu klasör projenin kalıcı bilgi bankasıdır; terminal bu notlara göre yazı
 | [`10-prz-ve-onay.md`](10-prz-ve-onay.md) | PRZ hesaplama/çakışma kuralları, Terminal Price Bar, ideal dönüş, uyarı sinyalleri (blowout) |
 | [`11-islem-yonetimi.md`](11-islem-yonetimi.md) | İşlem yönetimi: IPO, PPZ, SLZ, 0.382 trailer, zaman projeksiyonları, kontrol listesi |
 | [`12-rsi-bamm.md`](12-rsi-bamm.md) | RSI BAMM — RSI + harmonik formasyon onay/diverjans stratejisi |
+| [`13-price-action-smc.md`](13-price-action-smc.md) | **Price Action / SMC** — harmoniğe yapısal onay katmanı. #3 CHoCH/MSB (alt TF giriş onayı) tanımlı; Order Block / FVG / Liquidity Sweep yol haritası. |
 
 ## Hızlı Referans Tablosu
 

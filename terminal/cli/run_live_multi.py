@@ -28,9 +28,10 @@ from terminal.data.mexc_futures import MexcFuturesClient, MexcFuturesError
 from terminal.paper.engine import PaperEngine
 from terminal.db.store import Store
 from terminal.detection.scanner import default_threshold, scan_klines, time_symmetry
+from terminal.detection.structure import check_choch
 from terminal.lifecycle.states import ADAY, AKTIF, EO, STOP, TP, ZI
 from terminal.lifecycle.tracker import LifecycleTracker, Transition
-from terminal.quality.htf_ltf import htf_for
+from terminal.quality.htf_ltf import htf_for, ltf_for
 from terminal.telegram_bot.cards import aday_card, aktif_card, exit_card
 from terminal.telegram_bot.charts import render_setup_chart
 from terminal.telegram_bot.client import TelegramClient, TelegramError
@@ -44,6 +45,10 @@ POTENTIAL_TG_INTERVALS = {"4h", "1d"}
 
 # HTF verisi yavaş değişir → bu süreden sık yeniden çekme (rate-limit tasarrufu).
 HTF_REFRESH_SECONDS = 120
+
+# LTF (CHoCH onay) verisi hızlı değişir ama geçişler seyrek; arka arkaya
+# geçişlerde MEXC'i dövmemek için kısa cache.
+LTF_REFRESH_SECONDS = 30
 
 
 def _fmt(ms: int) -> str:
@@ -75,6 +80,7 @@ class PairWorker:
         paper_min_confluence: int = 0,
         paper_entry_mode: str = "market",
         min_time_symmetry: float = 0.0,
+        ltf_choch: bool = False,
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -100,6 +106,11 @@ class PairWorker:
         self.paper_entry_mode = paper_entry_mode
         # Yapısal filtre #2: AB/CD zaman simetrisi < eşik → paper'a açma (0=kapalı).
         self.min_time_symmetry = min_time_symmetry
+        # Yapısal filtre #3: ALT TF CHoCH onayı — D sonrası LTF'de yapı kırılımı
+        # yoksa paper'a açma (Price Action giriş onayı). En iyi limit modda çalışır
+        # (AKTIF = fiyat PRZ'ye değdi → LTF'de birkaç onay barı oluşmuş olur).
+        self.ltf_choch = ltf_choch
+        self.ltf_interval = ltf_for(interval) if ltf_choch else None
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -109,6 +120,8 @@ class PairWorker:
         self._running = False
         self._htf_cache: list[dict[str, Any]] | None = None
         self._htf_last_fetch = 0.0  # HTF cache zaman damgası (zaman-cache için)
+        self._ltf_cache: list[dict[str, Any]] | None = None
+        self._ltf_last_fetch = 0.0  # LTF (CHoCH) cache zaman damgası
         self._tag = f"[{symbol} {interval}]"
         # Potansiyel pattern dedup key — (spec_name, x_time, a_time, b_time, c_time)
         self._last_potential_key: tuple | None = None
@@ -163,6 +176,11 @@ class PairWorker:
                         log.info("%s [AKTIF] %s simetri=%.2f < %.2f → paper'a açma",
                                  self._tag, t.setup.pattern_name, sym, self.min_time_symmetry)
                         return
+                # Yapısal filtre #3: ALT TF CHoCH onayı (Price Action giriş onayı)
+                if self.ltf_choch and not self._choch_confirmed(t.setup):
+                    log.info("%s [AKTIF] %s CHoCH onayı yok (%s) → paper'a açma",
+                             self._tag, t.setup.pattern_name, self.ltf_interval)
+                    return
                 if self.paper_entry_mode == "limit":
                     # LİMİT: fiyat entry'ye değdi (pasif AKTIF) → TAM entry
                     # fiyatından aç (slippage yok). Sonraki-bar pending YOK.
@@ -310,6 +328,35 @@ class PairWorker:
         except (MexcError, MexcFuturesError) as e:
             log.warning("%s HTF fetch: %s", self._tag, e)  # eski cache'i koru
         return self._htf_cache
+
+    def _fetch_ltf(self) -> list[dict[str, Any]] | None:
+        """CHoCH onayı için ALT TF mum dizisini çek (kısa cache)."""
+        if self.ltf_interval is None or self.client is None:
+            return None
+        now = time.time()
+        if self._ltf_cache is not None and (now - self._ltf_last_fetch) < LTF_REFRESH_SECONDS:
+            return self._ltf_cache
+        try:
+            self._ltf_cache = self.client.klines(self.symbol, self.ltf_interval, limit=200)
+            self._ltf_last_fetch = now
+        except (MexcError, MexcFuturesError) as e:
+            log.warning("%s LTF fetch: %s", self._tag, e)  # eski cache'i koru
+        return self._ltf_cache
+
+    def _choch_confirmed(self, setup) -> bool:
+        """ALT TF'de setup yönünde CHoCH/MSB onayı var mı (D pivotundan sonra)?
+
+        LTF verisi çekilemezse fail-open: True döner (tek veri hıçkırığı yüzünden
+        tüm işlemleri düşürmemek için — HTF cache mantığıyla tutarlı).
+        """
+        ltf = self._fetch_ltf()
+        if not ltf:
+            return True
+        d_time = setup.pivots["D"].time
+        ltf_after = [k for k in ltf if k["open_time"] > d_time]
+        if not ltf_after:
+            return False  # D çok yeni, henüz onay barı yok → onay yok
+        return check_choch(ltf_after, setup.direction).confirmed
 
     def _fill_pending_entries(self, fill_bar: dict[str, Any]) -> None:
         """Önceki barda AKTIF olan setup'ları bu barın AÇILIŞINDAN doldur.
@@ -567,6 +614,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-time-symmetry", type=float, default=0.0,
                         help="Yapısal filtre: AB/CD zaman simetrisi < eşik → paper'a açma "
                              "(0=kapalı, 1=tam simetrik). Backtest sweep'ine göre ayarla.")
+    parser.add_argument("--ltf-choch", action="store_true",
+                        help="Yapısal filtre #3 (Price Action): ALT TF'de (1H→5M, 4H→15M) "
+                             "CHoCH/MSB onayı olmadan paper'a açma. En iyi --paper-entry-mode "
+                             "limit ile çalışır (AKTIF = fiyat PRZ'ye değdi).")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -649,6 +700,7 @@ def main(argv: list[str] | None = None) -> int:
             paper_min_confluence=args.paper_min_confluence,
             paper_entry_mode=args.paper_entry_mode,
             min_time_symmetry=args.min_time_symmetry,
+            ltf_choch=args.ltf_choch,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)

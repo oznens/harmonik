@@ -70,8 +70,14 @@ def run_backtest(
     entry_mode: str = "market",
     zigzag: float | None = None,
     min_rr: float = 1.0,
+    ltf_klines: list[dict[str, Any]] | None = None,
 ) -> BacktestResult:
-    """Mum dizisi üzerinde backtest çalıştır → grafik + istatistik verisi."""
+    """Mum dizisi üzerinde backtest çalıştır → grafik + istatistik verisi.
+
+    entry_mode="choch" ise ltf_klines (ALT TF mum dizisi) verilmeli; her setup
+    için D'den sonraki LTF barlarıyla CHoCH onayı aranır. Verilmezse choch
+    modunda tüm setuplar EO döner (onay yapılamaz).
+    """
     if not klines:
         return BacktestResult(symbol, interval, entry_mode, [], [], [], {})
 
@@ -89,7 +95,11 @@ def run_backtest(
         if d_idx is None or d_idx >= len(klines) - 1:
             continue
         future = klines[d_idx + 1:]
-        o = simulate_outcome(s, future, entry_mode=entry_mode)
+        ltf_after = None
+        if entry_mode == "choch" and ltf_klines is not None:
+            d_time = s.pivots["D"].time
+            ltf_after = [k for k in ltf_klines if k["open_time"] > d_time]
+        o = simulate_outcome(s, future, entry_mode=entry_mode, ltf_klines=ltf_after)
         if o.entered_price is None or o.exited_time is None:
             continue  # girilmedi (EO) ya da kapanmadı
         raw_trades.append({

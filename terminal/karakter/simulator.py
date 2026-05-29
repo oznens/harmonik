@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from terminal.detection.models import Setup
+from terminal.detection.structure import check_choch
 
 
 @dataclass
@@ -31,6 +32,7 @@ def simulate_outcome(
     aktif_timeout: int = 120,
     force_immediate_entry: bool = True,
     entry_mode: str | None = None,
+    ltf_klines: list[dict[str, Any]] | None = None,
 ) -> SimOutcome:
     """D pivotundan sonraki mum dizisini gez, setup outcome'unu döner.
 
@@ -48,6 +50,11 @@ def simulate_outcome(
             ("immediate"/"passive"). "confirm" → ONAYLI giriş: D'den sonra ilk
             yapı kırılımı (BOS: kapanış önceki barın ekstremini kırar) beklenir;
             onaydan önce stop yenirse işlem AÇILMAZ (EO). Fakeout filtresi.
+            "choch" → ALT zaman dilimi (LTF) market yapısı kırılımı onayı:
+            ltf_klines verilmeli; D'den sonra LTF'de CHoCH/MSB beklenir,
+            onaydan sonra HTF barından girilir. ltf_klines yoksa EO.
+        ltf_klines: entry_mode="choch" için D pivotundan SONRAKİ ALT TF mum
+            dizisi. Diğer modlarda yok sayılır.
 
     Returns:
         SimOutcome — terminal state'e ulaştıysa TP/STOP/EO/ZI; ulaşmadıysa
@@ -59,6 +66,8 @@ def simulate_outcome(
         return _simulate_confirm(setup, future_klines, aday_timeout, aktif_timeout)
     if entry_mode == "limit":
         return _simulate_limit(setup, future_klines, aday_timeout, aktif_timeout)
+    if entry_mode == "choch":
+        return _simulate_choch(setup, future_klines, ltf_klines, aday_timeout, aktif_timeout)
 
     bull = setup.direction == "bull"
     entry_trigger = setup.entry
@@ -191,6 +200,84 @@ def _simulate_confirm(
                           exited_idx=None, exited_time=None, entered_price=None)
 
     # AKTIF: TP/STOP (önce STOP — canlı _check_aktif ile tutarlı)
+    for j in range(entered_idx, n):
+        bar = future[j]
+        hit_sl = (bull and bar["low"] <= setup.stop) or (not bull and bar["high"] >= setup.stop)
+        hit_tp = (bull and bar["high"] >= setup.tp1) or (not bull and bar["low"] <= setup.tp1)
+        if hit_sl:
+            return SimOutcome(outcome="STOP", entered_idx=entered_idx,
+                              entered_time=entered_time, exited_idx=j,
+                              exited_time=bar["open_time"], entered_price=entered_price,
+                              ambiguous=hit_tp)
+        if hit_tp:
+            return SimOutcome(outcome="TP", entered_idx=entered_idx,
+                              entered_time=entered_time, exited_idx=j,
+                              exited_time=bar["open_time"], entered_price=entered_price)
+        if j - entered_idx >= aktif_timeout:
+            return SimOutcome(outcome="ZI", entered_idx=entered_idx,
+                              entered_time=entered_time, exited_idx=j,
+                              exited_time=bar["open_time"], entered_price=entered_price)
+
+    return SimOutcome(outcome="Aktif", entered_idx=entered_idx, entered_time=entered_time,
+                      exited_idx=None, exited_time=None, entered_price=entered_price)
+
+
+def _simulate_choch(
+    setup: Setup,
+    future: list[dict[str, Any]],
+    ltf: list[dict[str, Any]] | None,
+    confirm_timeout: int,
+    aktif_timeout: int,
+) -> SimOutcome:
+    """CHoCH/MSB onaylı giriş — ALT zaman dilimi (LTF) yapı kırılımı ile.
+
+    Yapısal filtre #3 (Price Action). future = HTF D-sonrası barlar (TP/STOP
+    bu seviyelerde ölçülür); ltf = D pivotundan SONRAKİ alt TF barları.
+
+    Kural:
+      - LTF'de setup yönünde CHoCH onayı (kapanış son swing'i kırar) ara.
+        confirm_timeout LTF barında onay yoksa → işlem AÇILMAZ (EO).
+      - Onay zamanı tc. HTF future'da:
+          * tc'den ÖNCE (open_time < tc) stop yenirse → EO (onay öncesi ters).
+          * open_time > tc olan İLK HTF barından gir (o barın açılışı = market).
+      - AKTIF: önce STOP (canlı _check_aktif ile tutarlı), aktif_timeout → ZI.
+
+    ltf yoksa/boşsa onay yapılamaz → EO (filtre, veri olmadan girmez).
+    """
+    bull = setup.direction == "bull"
+    if not ltf:
+        return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                          exited_idx=None, exited_time=None, entered_price=None)
+
+    ch = check_choch(ltf, setup.direction, max_bars=confirm_timeout)
+    if not ch.confirmed or ch.confirm_time is None:
+        return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                          exited_idx=None, exited_time=None, entered_price=None)
+    tc = ch.confirm_time
+
+    n = len(future)
+    entered_idx: int | None = None
+    entered_time: int | None = None
+    entered_price: float | None = None
+    for i in range(n):
+        bar = future[i]
+        if bar["open_time"] <= tc:
+            # Onaydan önce/onay barında stop yenirse → işlem açılmaz (EO).
+            if (bull and bar["low"] <= setup.stop) or (not bull and bar["high"] >= setup.stop):
+                return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                                  exited_idx=i, exited_time=bar["open_time"],
+                                  entered_price=None)
+            continue
+        # Onaydan sonraki ilk HTF barı → market girişi (bar açılışı).
+        entered_idx = i
+        entered_time = bar["open_time"]
+        entered_price = bar["open"]
+        break
+
+    if entered_idx is None:
+        return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                          exited_idx=None, exited_time=None, entered_price=None)
+
     for j in range(entered_idx, n):
         bar = future[j]
         hit_sl = (bull and bar["low"] <= setup.stop) or (not bull and bar["high"] >= setup.stop)
