@@ -72,6 +72,7 @@ class PairWorker:
         paper_engine: "PaperEngine | None" = None,
         startup_delay: float = 0.0,
         poll_seconds: int = POLL_INTERVAL_SECONDS,
+        paper_min_confluence: int = 0,
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -89,6 +90,9 @@ class PairWorker:
         self.htf_interval = htf_for(interval) if use_htf else None
         self.startup_delay = startup_delay
         self.poll_seconds = poll_seconds
+        # Paper'a SADECE confluence >= bu eşik olan setupları aç (0 = filtre yok).
+        # Lifecycle yine tüm setupları takip eder; bu yalnız paper defterini süzer.
+        self.paper_min_confluence = paper_min_confluence
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -134,6 +138,14 @@ class PairWorker:
         paper_closed = None  # bu çıkışta gerçekten bir paper pozisyonu kapandı mı
         if self.paper is not None and t.setup_id is not None:
             if t.new_state == AKTIF:
+                # Confluence eşiği: düşük skorlular paper'a girmesin (lifecycle'da
+                # yine takip edilir). Veri: <50 zarar, 50-69 edge.
+                if (self.paper_min_confluence > 0
+                        and (t.setup.confluence_score or 0) < self.paper_min_confluence):
+                    log.info("%s [AKTIF] %s conf=%d < paper eşiği %d → paper'a açma",
+                             self._tag, t.setup.pattern_name,
+                             t.setup.confluence_score or 0, self.paper_min_confluence)
+                    return
                 self._pending_entries[t.setup_id] = t.setup
                 return  # dolum sonraki barda; AKTIF kartı/bildirimi o an
             elif t.new_state in (TP, STOP, ZI, EO):
@@ -516,6 +528,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--poll-seconds", type=int, default=POLL_INTERVAL_SECONDS,
                         help=f"Mum yoklama aralığı (sn, varsayılan {POLL_INTERVAL_SECONDS}). "
                              "Çok kombinasyonda (örn. 250) rate limit için 30 önerilir.")
+    parser.add_argument("--paper-min-confluence", type=int, default=0,
+                        help="Paper'a SADECE confluence >= bu eşik olan setupları aç "
+                             "(0 = filtre yok). Veri: <50 zarar, 50-69 edge → 50 önerilir.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -595,6 +610,7 @@ def main(argv: list[str] | None = None) -> int:
             use_futures=args.futures, paper_engine=paper_engine,
             startup_delay=idx * (args.stagger_ms / 1000.0),
             poll_seconds=args.poll_seconds,
+            paper_min_confluence=args.paper_min_confluence,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)
