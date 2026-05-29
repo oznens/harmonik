@@ -73,6 +73,7 @@ class PairWorker:
         startup_delay: float = 0.0,
         poll_seconds: int = POLL_INTERVAL_SECONDS,
         paper_min_confluence: int = 0,
+        paper_entry_mode: str = "market",
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -93,6 +94,9 @@ class PairWorker:
         # Paper'a SADECE confluence >= bu eşik olan setupları aç (0 = filtre yok).
         # Lifecycle yine tüm setupları takip eder; bu yalnız paper defterini süzer.
         self.paper_min_confluence = paper_min_confluence
+        # "market": agresif giriş, sonraki bar açılışından dolum (slippage'lı).
+        # "limit":  pasif giriş, fiyat entry'ye değince TAM entry'den dolum (limit emir).
+        self.paper_entry_mode = paper_entry_mode
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -118,23 +122,26 @@ class PairWorker:
         # register_new agresif girişte AKTIF'i bootstrap'ta da emit ettiği için
         # bu kapı paper'ın eski setuplarla dolmasını engeller. Çıkışlar (TP/STOP/
         # ZI/EO) muaf — gerçek zamanlı kapanışlar her zaman işlenir.
+        # Freshness/elenen kapısı — yalnızca yeni TESPİT olayında. market modda
+        # tespit = AKTIF (agresif), limit modda tespit = ADAY (pasif). Böylece
+        # limit modda entry'ye değme (AKTIF) anı freshness'e takılmaz; bootstrap
+        # backlog ise tespit (ADAY) anında elenmeye devam eder.
+        detection_state = ADAY if self.paper_entry_mode == "limit" else AKTIF
         if t.new_state in (ADAY, AKTIF):
             if t.setup.elenen and not self.include_elenen:
                 log.info("%s [%s] %s elenen → atla",
                          self._tag, t.new_state, t.setup.pattern_name)
                 return
-            latest = self.poller.buffer.latest if self.poller else None
-            if latest is not None and self.tracker is not None:
-                age = (latest["open_time"] - t.setup.pivots["D"].time) // self.tracker._interval_ms()
-                if age > self.FRESH_ADAY_BARS:
-                    log.info("%s [%s] %s D pivot eski (%d bar) → atla",
-                             self._tag, t.new_state, t.setup.pattern_name, age)
-                    return
+            if t.new_state == detection_state:
+                latest = self.poller.buffer.latest if self.poller else None
+                if latest is not None and self.tracker is not None:
+                    age = (latest["open_time"] - t.setup.pivots["D"].time) // self.tracker._interval_ms()
+                    if age > self.FRESH_ADAY_BARS:
+                        log.info("%s [%s] %s D pivot eski (%d bar) → atla",
+                                 self._tag, t.new_state, t.setup.pattern_name, age)
+                        return
 
         # Paper trade motoru — confluence/Q filtrelerinden bağımsız.
-        # AKTIF: hemen açma — gerçekçi giriş için SONRAKİ barın açılışından
-        # doldurulmak üzere pending'e al (fill + bildirim _fill_pending_entries
-        # içinde). Çıkış: paper'da kapat.
         paper_closed = None  # bu çıkışta gerçekten bir paper pozisyonu kapandı mı
         if self.paper is not None and t.setup_id is not None:
             if t.new_state == AKTIF:
@@ -146,6 +153,15 @@ class PairWorker:
                              self._tag, t.setup.pattern_name,
                              t.setup.confluence_score or 0, self.paper_min_confluence)
                     return
+                if self.paper_entry_mode == "limit":
+                    # LİMİT: fiyat entry'ye değdi (pasif AKTIF) → TAM entry
+                    # fiyatından aç (slippage yok). Sonraki-bar pending YOK.
+                    trade = self.paper.open_trade(
+                        t.setup, t.setup_id, t.trigger_time, entry_price=t.setup.entry)
+                    if trade is not None and self.tg is not None and not self._in_reconcile:
+                        self._notify_trade_opened(t.setup, trade)
+                    return
+                # market: sonraki barın açılışından doldur (pending)
                 self._pending_entries[t.setup_id] = t.setup
                 return  # dolum sonraki barda; AKTIF kartı/bildirimi o an
             elif t.new_state in (TP, STOP, ZI, EO):
@@ -351,7 +367,11 @@ class PairWorker:
                 d_time = s.pivots["D"].time
                 tag = "YENI" if d_time >= klines[-3]["open_time"] else "TARIHSEL"
                 log.info("%s [%s] %s | id=%d", self._tag, tag, s.summary(), sid)
-                self.tracker.register_new(s, sid, klines=klines)
+                # limit modda PASİF giriş: ADAY → fiyat entry'ye değince AKTIF.
+                # market modda agresif: tespitte direkt AKTIF.
+                self.tracker.register_new(
+                    s, sid, klines=klines,
+                    aggressive_entry=(self.paper_entry_mode != "limit"))
         self.tracker.advance(klines)
         # Potansiyel (henüz oluşmamış) pattern kontrolü — yeni X-A-B-C
         self._check_potential(klines)
@@ -531,6 +551,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--paper-min-confluence", type=int, default=0,
                         help="Paper'a SADECE confluence >= bu eşik olan setupları aç "
                              "(0 = filtre yok). Veri: <50 zarar, 50-69 edge → 50 önerilir.")
+    parser.add_argument("--paper-entry-mode", choices=["market", "limit"], default="market",
+                        help="market: agresif, sonraki bar açılışından dolum (slippage'lı). "
+                             "limit: pasif, fiyat entry'ye değince TAM entry'den dolum.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -611,6 +634,7 @@ def main(argv: list[str] | None = None) -> int:
             startup_delay=idx * (args.stagger_ms / 1000.0),
             poll_seconds=args.poll_seconds,
             paper_min_confluence=args.paper_min_confluence,
+            paper_entry_mode=args.paper_entry_mode,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)
