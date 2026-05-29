@@ -97,18 +97,12 @@ def simulate_outcome(
                 hit_sl = bar["high"] >= setup.stop
 
             if hit_tp and hit_sl:
-                # Aynı barda hem TP hem SL touch oldu → bar içi sıralama
-                # bilinmiyor (özellikle 1d gibi büyük TF'lerde sık).
-                # Kural: bar KAPANIŞ pozisyonu kazançta ise TP varsay,
-                # zararda ise STOP. (Eski mantık: hep STOP — yanıltıcı,
-                # XRPUSDT 1d gibi rally'li bar'lar TP yerine STOP işaretliyordu.)
-                close = bar["close"]
-                close_in_profit = (
-                    (bull and close > entry_trigger) or
-                    (not bull and close < entry_trigger)
-                )
-                outcome = "TP" if close_in_profit else "STOP"
-                return SimOutcome(outcome=outcome, entered_idx=entered_idx,
+                # Canlı motorla (_check_aktif: önce STOP kontrol eder) TUTARLI:
+                # aynı barda ikisi de değerse bar içi sıralama bilinmediğinden
+                # STOP varsay (tutucu). Böylece backtest WR'si canlı paper ile
+                # birebir karşılaştırılabilir. (Eski: kapanış yönüne göre TP/STOP
+                # — canlıdan iyimserdi, WR'yi şişiriyordu.)
+                return SimOutcome(outcome="STOP", entered_idx=entered_idx,
                                   entered_time=entered_time, exited_idx=i,
                                   exited_time=bar["open_time"], ambiguous=True,
                                   entered_price=entered_price)
