@@ -184,7 +184,7 @@ def card_html(t: dict) -> str:
         f'<div class="row"><span class="k">D ZONE</span><span class="dim">{_fmt_price(d_zone)}</span></div>'
         f'<div class="row"><span class="k">Entry</span><b>{_fmt_price(entry)}</b></div>'
         f'<div class="row"><span class="k">SL</span><b>{_fmt_price(stop)}</b></div>'
-        f'<div class="row"><span class="k">TP</span><b class="g">{_fmt_price(tp)}</b></div>'
+        f'<div class="row"><span class="k">Hedef</span><b class="g">{_fmt_price(tp)}</b></div>'
         f'</div></div>'
         f'<div class="tc-foot">{_e(foot)}</div>'
         f'</div>'

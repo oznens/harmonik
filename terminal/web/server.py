@@ -362,7 +362,7 @@ def _open_table(rows: list) -> str:
         return '<div class="empty">Açık pozisyon yok.</div>'
     head = ("<table><thead><tr>"
             '<th class="l">Parite</th><th>TF</th><th class="l">Pattern</th><th>Yön</th>'
-            "<th>Entry</th><th>Stop</th><th>TP1</th><th>R:R</th>"
+            "<th>Entry</th><th>Stop</th><th>Hedef</th><th>R:R</th>"
             "<th>Pozisyon</th><th>Lev</th><th>Açıldı</th><th>Yaş</th>"
             "</tr></thead><tbody>")
     body = []

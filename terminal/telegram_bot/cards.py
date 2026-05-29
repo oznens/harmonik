@@ -73,8 +73,7 @@ def aday_card(setup: Setup, karakter: tuple[float, int] | None = None) -> str:
         f"PRZ: `{s.prz_low:.6g} – {s.prz_high:.6g}`",
         f"Entry: `{s.entry:.6g}`",
         f"SL: `{s.stop:.6g}` ({risk_pct:.2f}%)",
-        f"TP1: `{s.tp1:.6g}` ({reward1_pct:.2f}%) · R:R `{rr:.2f}`",
-        f"TP2: `{s.tp2:.6g}`",
+        f"Hedef (TP): `{s.tp1:.6g}` ({reward1_pct:.2f}%) · R:R `{rr:.2f}`",
         "",
         f"B={s.b_ratio:.3f}  D={s.d_ratio:.3f}"
         + ("  AB=CD ✓" if s.ab_cd_equivalent else ""),
@@ -99,7 +98,7 @@ def aktif_card(setup: Setup, trigger_price: float, trigger_time: int) -> str:
         f"*{s.symbol}* `{s.interval}` — `{s.pattern_name}`\n"
         "\n"
         f"Entry tetiklendi: `{trigger_price:.6g}` @ `{_fmt(trigger_time)}`\n"
-        f"SL: `{s.stop:.6g}`  TP1: `{s.tp1:.6g}`  TP2: `{s.tp2:.6g}`"
+        f"SL: `{s.stop:.6g}`  Hedef (TP): `{s.tp1:.6g}`"
     )
 
 

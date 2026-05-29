@@ -13,7 +13,7 @@ from terminal.ui.data_provider import DataProvider, SetupRow
 from terminal.ui.widgets.detail_panel import DetailPanel
 
 COLUMNS = ["Parite", "TF", "Pattern", "Yön", "Durum", "Poz",
-           "Q", "Entry", "SL", "TP1", "D Zamanı"]
+           "Q", "Entry", "SL", "Hedef", "D Zamanı"]
 
 
 def _fmt(ms: int) -> str:

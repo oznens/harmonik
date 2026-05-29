@@ -124,7 +124,7 @@ class TradesTab(QWidget):
 
         # --- AÇIK POZİSYONLAR ---
         self.open_table = self._make_table([
-            "Parite", "TF", "Pattern", "Yön", "Entry", "Stop", "TP1", "R:R",
+            "Parite", "TF", "Pattern", "Yön", "Entry", "Stop", "Hedef", "R:R",
             "Pozisyon", "Lev", "Risk", "Açıldı", "Yaş",
         ])
         self.open_table.doubleClicked.connect(

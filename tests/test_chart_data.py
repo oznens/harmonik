@@ -71,7 +71,9 @@ def test_build_payload_well_formed(store: Store):
     letters = {m["text"] for m in payload["harmonic"]["markers"]}
     assert {"X", "A", "B", "C", "D"} <= letters
     titles = {lv["title"] for lv in payload["harmonic"]["levels"]}
-    assert {"Entry", "SL", "TP1", "TP2"} <= titles
+    # Tek hedef ("Hedef" = tp1); tp2 görselde gösterilmez (rr1 tek 1:1 hedef).
+    assert {"Entry", "SL", "Hedef"} <= titles
+    assert "TP2" not in titles
     # Seçici listesi + varsayılan "auto"
     assert payload["selected"] == "auto"
     assert any(opt["id"] == sid for opt in payload["setups"])

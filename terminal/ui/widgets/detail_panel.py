@@ -137,8 +137,7 @@ class DetailPanel(QFrame):
         <div>
             <b>Entry:</b> <code>{setup.entry:.6g}</code><br>
             <b>SL:</b> <code>{setup.stop:.6g}</code> ({risk_pct:.2f}%)<br>
-            <b>TP1:</b> <code>{setup.tp1:.6g}</code> ({reward_pct:.2f}%) · R:R <b>{rr:.2f}</b><br>
-            <b>TP2:</b> <code>{setup.tp2:.6g}</code><br>
+            <b>Hedef (TP):</b> <code>{setup.tp1:.6g}</code> ({reward_pct:.2f}%) · R:R <b>{rr:.2f}</b><br>
         </div>
         <hr>
         <div><b>PRZ Bileşenleri:</b><br>{prz_html}</div>

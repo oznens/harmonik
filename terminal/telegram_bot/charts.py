@@ -172,12 +172,12 @@ def render_setup_chart(setup: Setup, klines: list[dict[str, Any]],
                 ha="right", va="bottom", fontsize=10, fontweight="bold",
                 color=PRZ_EDGE, zorder=12)
 
-    # 5) Entry / SL / TP1 / TP2 yatay çizgileri — net + etiketli
+    # 5) Entry / SL / Hedef yatay çizgileri — net + etiketli.
+    # Tek hedef (tp1 = 1R); tp2 (2R) görselde gösterilmez.
     levels = [
         ("Entry", setup.entry, ENTRY_COLOR, "-",  1.4),
         ("SL",    setup.stop,  SL_COLOR,    "--", 1.2),
-        ("TP1",   setup.tp1,   TP_COLOR,    "--", 1.2),
-        ("TP2",   setup.tp2,   TP_COLOR,    ":",  1.0),
+        ("Hedef", setup.tp1,   TP_COLOR,    "--", 1.2),
     ]
     x_right = len(df) - 1
     for label, price, color, ls, lw in levels:

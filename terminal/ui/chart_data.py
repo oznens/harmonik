@@ -230,8 +230,7 @@ def _harmonic_layer(
     levels = [
         {"price": setup.entry, "color": BLUE, "title": "Entry", "style": "solid"},
         {"price": setup.stop, "color": RED, "title": "SL", "style": "dashed"},
-        {"price": setup.tp1, "color": GREEN, "title": "TP1", "style": "dashed"},
-        {"price": setup.tp2, "color": GREEN, "title": "TP2", "style": "dotted"},
+        {"price": setup.tp1, "color": GREEN, "title": "Hedef", "style": "dashed"},
         {"price": setup.prz_low, "color": GOLD, "title": "PRZ↓", "style": "dotted"},
         {"price": setup.prz_high, "color": GOLD, "title": "PRZ↑", "style": "dotted"},
     ]

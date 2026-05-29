@@ -13,7 +13,7 @@ from terminal.ui.data_provider import DataProvider, SetupRow
 from terminal.ui.widgets.detail_panel import DetailPanel
 
 COLUMNS = ["Kaynak", "Parite", "TF", "Pattern", "Yön", "Sonuç", "Q",
-           "Entry", "SL", "TP1", "Tespit"]
+           "Entry", "SL", "Hedef", "Tespit"]
 
 OUTCOMES = ["Hepsi", "TP", "STOP", "EO", "ZI"]
 SOURCES = ["Hepsi", "Live", "Backtest"]
