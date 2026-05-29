@@ -17,6 +17,7 @@ ExecStart=/home/harmonik/harmonik/venv/bin/python -m terminal.cli.run_live_multi
     --min-confluence 70 \
     --poll-seconds 30 \
     --stagger-ms 300 \
+    --paper-min-confluence 50 \
     --log-level INFO
 Restart=on-failure
 RestartSec=10
