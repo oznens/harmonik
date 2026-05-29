@@ -50,6 +50,11 @@ HTF_REFRESH_SECONDS = 120
 # geçişlerde MEXC'i dövmemek için kısa cache.
 LTF_REFRESH_SECONDS = 30
 
+# CHoCH onayı bekleyen setup, D pivotundan bu kadar HTF barı geçtikten sonra
+# hâlâ onaylanmadıysa vazgeçilir (bayat giriş engeli). Onay PRZ'den hemen sonra
+# gelmeli; gecikirse "düşen bıçak" riski artar.
+CHOCH_WAIT_BARS = 12
+
 
 def _fmt(ms: int) -> str:
     return format_local(ms)
@@ -131,6 +136,9 @@ class PairWorker:
         # Gerçekçi giriş: AKTIF olan setup'lar sonraki barın açılışından
         # doldurulmak üzere burada bekler — {setup_id: Setup}.
         self._pending_entries: dict[int, Any] = {}
+        # CHoCH onayı bekleyen setuplar — {setup_id: Setup}. Her barda LTF
+        # yeniden kontrol edilir; onay gelince paper açılır, gecikirse vazgeçilir.
+        self._pending_choch: dict[int, Any] = {}
         # Bootstrap reconcile sırasında True → kaçan çıkışlar paper'a yansır ama
         # Telegram'a eski bildirim yağmuru gönderilmez.
         self._in_reconcile = False
@@ -393,6 +401,46 @@ class PairWorker:
             if self.tg is not None:
                 self._notify_trade_opened(setup, trade)
 
+    def _check_pending_choch(self) -> None:
+        """CHoCH onayı bekleyen setupları her barda yeniden kontrol et (LTF'ye in).
+
+        AKTIF anında onay yoksa setup parka alınır; burada LTF tekrar çekilip
+        yapı kırılımı oluştu mu bakılır. Onaylanınca paper açılır (market:
+        sonraki bar açılışından dolum; limit: TAM entry'den). Lifecycle terminal
+        olduysa (stop/tp/zi) ya da D'den CHOCH_WAIT_BARS geçtiyse vazgeçilir.
+        Bu, backtest "choch" modunun canlı karşılığıdır: iner ve onayı bekler.
+        """
+        if not self._pending_choch or self.paper is None:
+            return
+        latest = self.poller.buffer.latest if self.poller else None
+        if latest is None:
+            return
+        interval_ms = self.tracker._interval_ms() if self.tracker else 1
+        pending = self._pending_choch
+        self._pending_choch = {}
+        for sid, setup in pending.items():
+            life = self.store.get_lifecycle(sid) if self.store else None
+            if life is None or life["state"] != AKTIF:
+                continue  # kapandı / stop oldu → vazgeç (onayı beklerken bitti)
+            age = (latest["open_time"] - setup.pivots["D"].time) // interval_ms
+            if age > CHOCH_WAIT_BARS:
+                log.info("%s [CHoCH] %s onay gelmedi (%d bar) → vazgeç",
+                         self._tag, setup.pattern_name, age)
+                continue
+            if not self._choch_confirmed(setup):
+                self._pending_choch[sid] = setup  # beklemeye devam et
+                continue
+            # Onaylandı → paper aç.
+            if self.paper_entry_mode == "limit":
+                trade = self.paper.open_trade(
+                    setup, sid, latest["open_time"], entry_price=setup.entry)
+                if trade is not None and self.tg is not None and not self._in_reconcile:
+                    self._notify_trade_opened(setup, trade)
+            else:
+                self._pending_entries[sid] = setup  # sonraki bar açılışından dol
+            log.info("%s [CHoCH] %s onaylandı (%d bar sonra) → paper aç",
+                     self._tag, setup.pattern_name, age)
+
     def _reconcile_open(self) -> None:
         """Bootstrap sonrası: açık setup'larda kaçan STOP/TP'yi onar.
 
@@ -424,6 +472,9 @@ class PairWorker:
         # Gerçekçi giriş: önceki barda biriken AKTIF setupları bu barın
         # açılışından doldur (tarama/advance'ten önce).
         self._fill_pending_entries(klines[-1])
+        # CHoCH onayı bekleyenleri (varsa) yeniden kontrol et — LTF'ye inip
+        # yapı kırılımı oluştuysa paper'a al.
+        self._check_pending_choch()
         htf_klines = self._fetch_htf()
         setups = scan_klines(klines, self.symbol, self.interval,
                              zigzag_threshold=self.threshold, htf_klines=htf_klines)
