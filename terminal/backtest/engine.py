@@ -1,0 +1,125 @@
+"""Görsel backtest motoru — UI'siz, saf fonksiyon.
+
+Bir mum dizisi üzerinde harmonik formasyonları tarar (scan_klines), seçilen
+giriş moduyla simüle eder (simulate_outcome), kronolojik portföyü hesaplar
+(simulate_portfolio) ve HER İŞLEMİN grafik verisini (XABCD pivotları + giriş/
+çıkış + sonuç) üretir. UI 'Backtest' sekmesi bunu lightweight-charts ile çizer.
+
+DB'ye yazmaz. CLI'dan veya UI'dan çağrılabilir.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from terminal.detection.scanner import default_threshold, scan_klines
+from terminal.karakter.portfolio import simulate_portfolio
+from terminal.karakter.simulator import simulate_outcome
+
+_PIVOT_LETTERS = "XABCD"
+
+
+def _sec(ms: int) -> int:
+    return int(ms) // 1000
+
+
+@dataclass
+class BacktestResult:
+    symbol: str
+    interval: str
+    entry_mode: str
+    candles: list[dict[str, Any]]   # lightweight-charts mum verisi (time saniye)
+    trades: list[dict[str, Any]]    # her işlem: pivots + giriş/çıkış + outcome + pnl
+    equity: list[dict[str, Any]]    # {time, value} equity eğrisi
+    stats: dict[str, Any]
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol, "interval": self.interval,
+            "entry_mode": self.entry_mode, "candles": self.candles,
+            "trades": self.trades, "equity": self.equity, "stats": self.stats,
+        }
+
+
+def _exit_price(setup, outcome: str) -> float:
+    return {"TP": setup.tp1, "STOP": setup.stop}.get(outcome, setup.entry)
+
+
+def run_backtest(
+    klines: list[dict[str, Any]],
+    symbol: str,
+    interval: str,
+    entry_mode: str = "market",
+    zigzag: float | None = None,
+    min_rr: float = 1.0,
+) -> BacktestResult:
+    """Mum dizisi üzerinde backtest çalıştır → grafik + istatistik verisi."""
+    if not klines:
+        return BacktestResult(symbol, interval, entry_mode, [], [], [], {})
+
+    threshold = zigzag if zigzag is not None else default_threshold(interval)
+    setups = scan_klines(klines, symbol, interval, zigzag_threshold=threshold, min_rr=min_rr)
+
+    idx_of = {k["open_time"]: i for i, k in enumerate(klines)}
+    raw_trades: list[dict[str, Any]] = []
+    setup_by_open: dict[int, Any] = {}   # giriş zamanı → setup (pivot çizimi için)
+
+    for s in setups:
+        if s.elenen:
+            continue
+        d_idx = idx_of.get(s.pivots["D"].time)
+        if d_idx is None or d_idx >= len(klines) - 1:
+            continue
+        future = klines[d_idx + 1:]
+        o = simulate_outcome(s, future, entry_mode=entry_mode)
+        if o.entered_price is None or o.exited_time is None:
+            continue  # girilmedi (EO) ya da kapanmadı
+        raw_trades.append({
+            "symbol": s.symbol, "interval": s.interval, "pattern": s.pattern_name,
+            "direction": s.direction, "ideal_entry": s.entry, "stop": s.stop,
+            "tp1": s.tp1, "fill": o.entered_price, "open_time": o.entered_time,
+            "close_time": o.exited_time, "outcome": o.outcome,
+            "confluence": s.confluence_score or 0,
+        })
+        # Birden çok setup aynı bara girebilir; portföy parite-başı-tek ile birini
+        # alır. Çizim için open_time → setup eşle (ilk gelen yeter).
+        setup_by_open.setdefault(o.entered_time, (s, o))
+
+    pf = simulate_portfolio(raw_trades)
+
+    # Portföyün GERÇEKTEN aldığı işlemleri (pf.closed) pivotlarıyla çiz
+    trades: list[dict[str, Any]] = []
+    for c in pf.closed:
+        so = setup_by_open.get(c["open_time"])
+        if so is None:
+            continue
+        s, o = so
+        pivots = []
+        for letter in _PIVOT_LETTERS:
+            p = s.pivots.get(letter)
+            if p is not None:
+                pivots.append({"time": _sec(p.time), "value": p.price, "label": letter})
+        trades.append({
+            "pattern": s.pattern_name, "direction": s.direction,
+            "outcome": c["outcome"], "pnl": c["pnl"],
+            "pivots": pivots,
+            "entry": {"time": _sec(o.entered_time), "price": o.entered_price},
+            "exit": {"time": _sec(o.exited_time or 0),
+                     "price": _exit_price(s, c["outcome"])},
+            "stop": s.stop, "tp1": s.tp1, "entry_level": s.entry,
+        })
+
+    equity = [{"time": _sec(ct), "value": eq} for ct, eq in pf.equity_curve]
+    stats = {
+        "n_trades": pf.n_trades, "tp": pf.tp, "stop": pf.stop, "zi": pf.zi,
+        "win_rate": pf.win_rate, "total_pnl": pf.total_pnl, "pnl_pct": pf.pnl_pct,
+        "max_drawdown_pct": pf.max_drawdown_pct, "final_equity": pf.final_equity,
+        "initial_equity": pf.initial_equity, "n_setups": len(setups),
+        "skipped_busy": pf.skipped_busy,
+    }
+    candles = [
+        {"time": _sec(k["open_time"]), "open": k["open"], "high": k["high"],
+         "low": k["low"], "close": k["close"]}
+        for k in klines
+    ]
+    return BacktestResult(symbol, interval, entry_mode, candles, trades, equity, stats)
