@@ -56,7 +56,8 @@ def run_lab(
     total_combos = len(symbols) * len(intervals)
     combo_idx = 0
     total_samples = 0
-    portfolio_trades: list[dict[str, Any]] = []  # canlı-kural portföy simülasyonu için
+    portfolio_trades: list[dict[str, Any]] = []  # ANINDA giriş (mevcut canlı kural)
+    portfolio_trades_confirm: list[dict[str, Any]] = []  # ONAYLI giriş (BOS) karşılaştırma
 
     for symbol in symbols:
         for interval in intervals:
@@ -166,6 +167,22 @@ def run_lab(
                         "confluence": s.confluence_score or 0,
                     })
 
+                # ONAYLI giriş (BOS) varyantı — aynı setup, farklı giriş kuralı.
+                # Karşılaştırma: anında giriş vs onay-bekleyen giriş hangisi daha iyi?
+                if not s.elenen:
+                    oc = simulate_outcome(s, future, entry_mode="confirm")
+                    if oc.entered_price is not None and oc.exited_time is not None:
+                        portfolio_trades_confirm.append({
+                            "symbol": s.symbol, "interval": s.interval,
+                            "pattern": s.pattern_name, "direction": s.direction,
+                            "ideal_entry": s.entry, "stop": s.stop, "tp1": s.tp1,
+                            "fill": oc.entered_price,
+                            "open_time": oc.entered_time,
+                            "close_time": oc.exited_time,
+                            "outcome": oc.outcome,
+                            "confluence": s.confluence_score or 0,
+                        })
+
             if progress:
                 progress(f"{tag} — tamam.")
 
@@ -180,8 +197,13 @@ def run_lab(
                 simulate_portfolio,
             )
             result = simulate_portfolio(portfolio_trades)
+            progress("ANINDA GİRİŞ (mevcut canlı kural):")
             progress(format_portfolio_summary(result))
-            # Confluence eşiği taraması — canlı --paper-min-confluence doğrulaması
+            # ONAYLI giriş (BOS) karşılaştırması — fakeout filtresi işe yarıyor mu?
+            result_conf = simulate_portfolio(portfolio_trades_confirm)
+            progress("ONAYLI GİRİŞ (BOS — D'den sonra yapı kırılımı bekle):")
+            progress(format_portfolio_summary(result_conf))
+            # Confluence eşiği taraması (anında giriş seti üzerinde)
             progress(format_confluence_sweep(portfolio_trades))
         except Exception as e:  # özet başarısız olsa da lab sonucu kaybolmasın
             log.warning("portföy simülasyonu hatası: %s", e)
