@@ -17,11 +17,28 @@ import time
 from typing import Any, Callable
 
 from terminal.data.mexc_client import MexcClient, MexcError
+from terminal.data.mexc_futures import MexcFuturesError
 from terminal.db.store import Store
 from terminal.detection.models import Setup
 from terminal.detection.scanner import _is_elenen, default_threshold, scan_klines
 from terminal.karakter.simulator import SimOutcome, simulate_outcome
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
+
+# Veri çekme hataları (spot + futures) — rate-limit (510) dahil
+_FETCH_ERRORS = (MexcError, MexcFuturesError)
+
+
+def _fetch_retry(fn, tag: str, attempts: int = 6):
+    """klines çekimini rate-limit'e (510) karşı geri-çekilmeli dene. None=başarısız."""
+    for i in range(1, attempts + 1):
+        try:
+            return fn()
+        except _FETCH_ERRORS as e:
+            wait = min(30, 2 ** i)
+            log.warning("%s veri denemesi %d/%d başarısız (%s) — %ss bekle",
+                        tag, i, attempts, e, wait)
+            time.sleep(wait)
+    return None
 
 log = logging.getLogger(__name__)
 
@@ -67,12 +84,11 @@ def run_lab(
             if progress:
                 progress(f"{tag} — veri çekiliyor...")
 
-            try:
-                klines = client.klines_paginated(symbol, interval, bars_per_pair)
-            except MexcError as e:
-                log.warning("%s veri çekme hatası: %s", tag, e)
+            klines = _fetch_retry(
+                lambda: client.klines_paginated(symbol, interval, bars_per_pair), tag)
+            if klines is None:
                 if progress:
-                    progress(f"{tag} — ATLANDI (veri yok)")
+                    progress(f"{tag} — ATLANDI (veri yok / rate-limit)")
                 continue
 
             if len(klines) < 100:
@@ -91,7 +107,7 @@ def run_lab(
                 try:
                     htf_klines = client.klines_paginated(symbol, htf_int, htf_bars, throttle=0.05)
                     htf_close_times = [k["close_time"] for k in htf_klines]
-                except MexcError as e:
+                except _FETCH_ERRORS as e:
                     log.warning("%s HTF (%s) veri hatası: %s", tag, htf_int, e)
                     htf_klines = None
 
