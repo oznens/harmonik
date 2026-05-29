@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Backtest</title>
+<style>
+  :root { --bg:#0e0e10; --panel:#1a1a1f; --border:#2a2a32; --text:#e6e6ea;
+          --dim:#888894; --gold:#d4a72c; --green:#26a69a; --red:#ef5350; --blue:#42a5f5; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:'Segoe UI','SF Pro Text',sans-serif; font-size:12px; overflow:hidden; }
+  #wrap { display:flex; flex-direction:column; height:100vh; }
+  #topbar { display:flex; align-items:center; gap:10px; padding:8px 12px;
+    background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .brand { font-weight:700; color:var(--gold); letter-spacing:.5px; }
+  select, input, button { background:var(--bg); color:var(--text);
+    border:1px solid var(--border); border-radius:4px; padding:4px 8px; font-size:12px; }
+  input#symbol { width:110px; text-transform:uppercase; }
+  button#run { background:var(--gold); color:var(--bg); font-weight:700; cursor:pointer; }
+  button#run:disabled { opacity:.5; cursor:wait; }
+  #stats { margin-left:auto; display:flex; gap:14px; flex-wrap:wrap; font-weight:600; }
+  #stats .k { color:var(--dim); font-weight:400; }
+  #charts { flex:1; display:flex; flex-direction:column; }
+  #price { flex:3; position:relative; }
+  #equity { flex:1; border-top:1px solid var(--border); position:relative; }
+  #status { position:absolute; inset:0; display:none; align-items:center;
+    justify-content:center; color:var(--dim); z-index:6; background:rgba(14,14,16,.6); }
+  .lbl { position:absolute; top:6px; left:10px; color:var(--dim); z-index:5; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="topbar">
+    <span class="brand">🔬 BACKTEST</span>
+    <input id="symbol" value="BTCUSDT" title="Parite" />
+    <select id="interval" title="Zaman dilimi">
+      <option>15m</option><option>30m</option><option selected>60m</option>
+      <option>4h</option><option>1d</option>
+    </select>
+    <select id="range" title="Aralık (geriye doğru)">
+      <option value="730">2 yıl</option><option value="365">1 yıl</option>
+      <option value="180" selected>6 ay</option><option value="90">3 ay</option>
+      <option value="30">1 ay</option>
+    </select>
+    <select id="mode" title="Giriş modu">
+      <option value="market" selected>market (D'den)</option>
+      <option value="limit">limit (entry'den)</option>
+      <option value="confirm">onaylı (BOS)</option>
+    </select>
+    <button id="run">Backtest Çalıştır</button>
+    <div id="stats"></div>
+  </div>
+  <div id="charts">
+    <div id="price"><div class="lbl">Fiyat + işlemler</div><div id="status">Çalıştır…</div></div>
+    <div id="equity"><div class="lbl">Equity ($)</div></div>
+  </div>
+</div>
+
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="lightweight-charts.standalone.production.js"></script>
+<script>
+"use strict";
+const LWC = window.LightweightCharts;
+const el = (id) => document.getElementById(id);
+const statusEl = el("status");
+function showStatus(m){ if(m){statusEl.textContent=m; statusEl.style.display="flex";} else statusEl.style.display="none"; }
+
+const baseLayout = { layout:{background:{color:"#0e0e10"},textColor:"#e6e6ea",fontSize:11},
+  grid:{vertLines:{color:"#1c1c22"},horzLines:{color:"#1c1c22"}},
+  rightPriceScale:{borderColor:"#2a2a32"},
+  timeScale:{borderColor:"#2a2a32",timeVisible:true,secondsVisible:false}, autoSize:true };
+
+const priceChart = LWC.createChart(el("price"), baseLayout);
+const candleSeries = priceChart.addCandlestickSeries({
+  upColor:"#26a69a", downColor:"#ef5350", borderVisible:false,
+  wickUpColor:"#26a69a", wickDownColor:"#ef5350" });
+
+const equityChart = LWC.createChart(el("equity"), baseLayout);
+const equitySeries = equityChart.addLineSeries({ color:"#d4a72c", lineWidth:2, priceLineVisible:false });
+
+// Zaman eksenlerini senkronla
+priceChart.timeScale().subscribeVisibleLogicalRangeChange(r => { if(r) equityChart.timeScale().setVisibleLogicalRange(r); });
+equityChart.timeScale().subscribeVisibleLogicalRangeChange(r => { if(r) priceChart.timeScale().setVisibleLogicalRange(r); });
+
+let tradeSeries = [];   // her işlemin XABCD çizgi serisi (yeni koşumda temizlenir)
+function clearTrades(){ for(const s of tradeSeries){ try{priceChart.removeSeries(s);}catch(e){} } tradeSeries=[]; }
+
+function render(d){
+  showStatus(d.candles && d.candles.length ? "" : "Veri yok");
+  candleSeries.setData(d.candles || []);
+  equitySeries.setData(d.equity || []);
+  clearTrades();
+  const markers = [];
+  for(const t of (d.trades || [])){
+    const bull = t.direction === "bull";
+    // XABCD çizgisi (her işlem için ayrı seri — hepsi hep çizili)
+    const pts = (t.pivots||[]).slice().sort((a,b)=>a.time-b.time).map(p=>({time:p.time,value:p.value}));
+    if(pts.length>=2){
+      const ls = priceChart.addLineSeries({ color:"rgba(212,167,44,0.55)", lineWidth:1,
+        lastValueVisible:false, priceLineVisible:false, lineStyle:LWC.LineStyle.Dashed });
+      ls.setData(pts); tradeSeries.push(ls);
+    }
+    // Pivot etiketleri
+    for(const p of (t.pivots||[])){
+      markers.push({ time:p.time, position:"inBar", color:"#d4a72c", shape:"circle", text:p.label });
+    }
+    // Giriş + çıkış okları
+    if(t.entry) markers.push({ time:t.entry.time, position: bull?"belowBar":"aboveBar",
+      color:"#42a5f5", shape: bull?"arrowUp":"arrowDown", text:"giriş" });
+    if(t.exit){
+      const win = t.outcome==="TP";
+      markers.push({ time:t.exit.time, position: bull?"aboveBar":"belowBar",
+        color: win?"#26a69a":(t.outcome==="STOP"?"#ef5350":"#888894"),
+        shape: win?"arrowDown":"arrowUp", text:t.outcome });
+    }
+  }
+  markers.sort((a,b)=>a.time-b.time);
+  candleSeries.setMarkers(markers);
+  if(d.candles && d.candles.length) priceChart.timeScale().fitContent();
+
+  const s = d.stats || {};
+  const sign = (s.total_pnl>=0)?"+":"";
+  el("stats").innerHTML = s.n_trades===undefined ? "" :
+    `<span><span class="k">İşlem</span> ${s.n_trades}</span>`+
+    `<span><span class="k">WR</span> ${(s.win_rate||0).toFixed(1)}%</span>`+
+    `<span><span class="k">P&L</span> ${sign}$${(s.total_pnl||0).toFixed(0)} (${sign}${(s.pnl_pct||0).toFixed(1)}%)</span>`+
+    `<span><span class="k">maxDD</span> ${(s.max_drawdown_pct||0).toFixed(1)}%</span>`+
+    `<span><span class="k">TP/STOP</span> ${s.tp||0}/${s.stop||0}</span>`+
+    `<span><span class="k">setup</span> ${s.n_setups||0}</span>`;
+}
+
+let bridge = null;
+function runBacktest(){
+  if(!bridge) return;
+  el("run").disabled = true;
+  showStatus("Backtest çalışıyor… (veri çekiliyor + simülasyon)");
+  bridge.requestBacktest(el("symbol").value.toUpperCase(), el("interval").value,
+    parseInt(el("range").value,10), el("mode").value);
+}
+el("run").addEventListener("click", runBacktest);
+
+new QWebChannel(qt.webChannelTransport, function(channel){
+  bridge = channel.objects.bridge;
+  bridge.resultReady.connect(function(json){ el("run").disabled=false; render(JSON.parse(json)); });
+  bridge.failed.connect(function(msg){ el("run").disabled=false; showStatus("Hata: "+msg); });
+  bridge.ready();
+});
+</script>
+</body>
+</html>

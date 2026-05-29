@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QMainWindow, QTabWidget, QVBoxLayout, QWidget
 from terminal.db.store import Store
 from terminal.ui.data_provider import DataProvider
 from terminal.ui.status_bar import StatusBar
+from terminal.ui.widgets.backtest_tab import BacktestTab
 from terminal.ui.widgets.journal_tab import JournalTab
 from terminal.ui.widgets.karakter_tab import KarakterTab
 from terminal.ui.widgets.live_chart_tab import LiveChartTab
@@ -50,10 +51,12 @@ class MainWindow(QMainWindow):
         self.results_tab = ResultsTab(self.provider)
         self.karakter_tab = KarakterTab(self.provider)
         self.journal_tab = JournalTab(store)
+        self.backtest_tab = BacktestTab(store)
 
         tabs = QTabWidget()
         tabs.addTab(self.setups_tab, "Setup'lar (Aday / Aktif)")
         tabs.addTab(self.live_chart_tab, "📈 Canlı Grafik")
+        tabs.addTab(self.backtest_tab, "🔬 Backtest")
         tabs.addTab(self.potential_tab, "🔮 Potansiyel")
         tabs.addTab(self.trades_tab, "💼 Tradeler")
         tabs.addTab(self.results_tab, "Sonuçlar")
