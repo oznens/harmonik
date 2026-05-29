@@ -4,11 +4,11 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QPushButton, QSpinBox, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView, QComboBox, QDialog, QFrame, QHBoxLayout, QHeaderView,
+    QLabel, QMessageBox, QPushButton, QSpinBox, QTableView, QVBoxLayout, QWidget,
 )
 
-from terminal.timeutil import format_local_short
+from terminal.timeutil import format_local, format_local_short
 from terminal.ui.data_provider import DataProvider, RunSummary
 
 COLUMNS = ["Parite", "TF", "Pattern", "Yön", "N", "TP", "STOP", "EO", "ZI", "WR %", "Karakter"]
@@ -56,11 +56,22 @@ class KarakterTab(QWidget):
         self.run_selector.setMinimumWidth(280)
         self.run_selector.currentIndexChanged.connect(self._on_run_changed)
 
+        # --- Sıfırla (tüm lab koşumlarını/örneklemlerini sil) ---
+        self.reset_btn = QPushButton("🗑 Sıfırla")
+        self.reset_btn.setToolTip("Tüm backtest koşumlarını, örneklemleri ve "
+                                  "karakter skorlarını siler (canlı veriye dokunmaz).")
+        self.reset_btn.clicked.connect(self._on_reset)
+        self.reset_btn.setStyleSheet(
+            "QPushButton { color: #ef5350; padding: 6px 12px; }"
+            "QPushButton:hover { background-color: #3a1f22; }"
+        )
+
         run_row = QHBoxLayout()
         run_row.addWidget(self.backtest_btn)
         run_row.addSpacing(16)
         run_row.addWidget(QLabel("Backtest koşumu:"))
         run_row.addWidget(self.run_selector)
+        run_row.addWidget(self.reset_btn)
         run_row.addStretch()
 
         # --- Run özet kartları ---
@@ -117,6 +128,8 @@ class KarakterTab(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
+        # Satıra çift tıkla → o kombinasyonun (seçili koşumdaki) trade'lerini göster
+        self.table.doubleClicked.connect(self._on_row_double_clicked)
 
         # Ana layout
         layout = QVBoxLayout(self)
@@ -251,4 +264,93 @@ class KarakterTab(QWidget):
         from terminal.ui.widgets.backtest_dialog import BacktestDialog
         dlg = BacktestDialog(self)
         dlg.finished_ok.connect(self.refresh)
+        dlg.exec()
+
+    def _on_reset(self) -> None:
+        """Tüm lab koşumlarını/örneklemlerini/skorları sil (onaylı)."""
+        runs = self.provider.list_runs()
+        n_runs = len(runs)
+        n_samples = sum(r.sample_count for r in runs)
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Karakter Lab'i Sıfırla")
+        msg.setText(f"{n_runs} koşum ve {n_samples} örneklem silinecek.")
+        msg.setInformativeText(
+            "Tüm backtest koşumları, örneklemler ve karakter skorları kalıcı "
+            "olarak silinir. Canlı tracker verisine (paper, canlı setuplar) "
+            "DOKUNULMAZ.\n\nDevam edilsin mi?")
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
+        if msg.exec() != QMessageBox.Yes:
+            return
+        counts = self.provider.store.reset_karakter()
+        self.refresh()
+        QMessageBox.information(
+            self, "Sıfırlandı",
+            f"Silindi: {counts['runs']} koşum, {counts['samples']} örneklem, "
+            f"{counts['scores']} skor, {counts['backtest_setups']} backtest setup.")
+
+    def _on_row_double_clicked(self, index) -> None:
+        """Skor tablosunda satıra çift tıkla → o kombinasyonun trade'lerini göster."""
+        row = index.row()
+        symbol = self.model.item(row, 0).text()
+        interval = self.model.item(row, 1).text()
+        pattern = self.model.item(row, 2).text()
+        direction = self.model.item(row, 3).text()
+        run_id = self.run_selector.currentData()   # seçili koşum (None=tümü)
+        self._show_trades(symbol, interval, pattern, direction, run_id)
+
+    def _show_trades(self, symbol: str, interval: str, pattern: str,
+                     direction: str, run_id) -> None:
+        from terminal.ui.styles import GREEN, RED
+        trades = self.provider.karakter_samples_for(
+            symbol, interval, pattern, direction, run_id=run_id)
+
+        run_lbl = "tüm koşumlar" if run_id is None else f"koşum #{run_id}"
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{symbol} {interval} {pattern} ({direction}) — {run_lbl}")
+        dlg.resize(820, 460)
+        lay = QVBoxLayout(dlg)
+
+        cols = ["D Zamanı", "Yön", "Sonuç", "Entry", "Dolum", "SL", "Hedef", "R", "HTF"]
+        model = QStandardItemModel(0, len(cols))
+        model.setHorizontalHeaderLabels(cols)
+        for t in trades:
+            r_txt = f"{t['r']:+.2f}R" if t["outcome"] in ("TP", "STOP") else "—"
+            fill = f"{t['fill']:.6g}" if t["fill"] is not None else "—"
+            htf = "—" if t["htf_aligned"] is None else (
+                f"{t['htf_trend']} {'✓' if t['htf_aligned'] else '✗'}")
+            cells = [
+                format_local(t["d_time"]), t["direction"], t["outcome"],
+                f"{t['entry']:.6g}", fill, f"{t['stop']:.6g}", f"{t['tp1']:.6g}",
+                r_txt, htf,
+            ]
+            items = [QStandardItem(c) for c in cells]
+            items[7].setData(float(t["r"]), Qt.UserRole)  # R sayısal sıralama
+            color = GREEN if t["outcome"] == "TP" else (RED if t["outcome"] == "STOP" else None)
+            if color:
+                items[2].setForeground(QColor(color))
+                items[7].setForeground(QColor(color))
+            model.appendRow(items)
+
+        table = QTableView()
+        table.setModel(model)
+        table.setSortingEnabled(True)
+        model.setSortRole(Qt.UserRole)
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        table.verticalHeader().setVisible(False)
+
+        tp = sum(1 for t in trades if t["outcome"] == "TP")
+        stp = sum(1 for t in trades if t["outcome"] == "STOP")
+        decided = tp + stp
+        wr = (tp / decided * 100) if decided else 0.0
+        total_r = sum(t["r"] for t in trades)
+        header = QLabel(
+            f"<b>{len(trades)}</b> örneklem · TP <b>{tp}</b> / STOP <b>{stp}</b> · "
+            f"WR <b>{wr:.1f}%</b> · Toplam <b>{total_r:+.2f}R</b>")
+        lay.addWidget(header)
+        lay.addWidget(table)
         dlg.exec()

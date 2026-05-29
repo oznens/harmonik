@@ -241,6 +241,49 @@ class DataProvider:
             for r in cur.fetchall()
         ]
 
+    def karakter_samples_for(
+        self, symbol: str, interval: str, pattern_name: str,
+        direction: str = "all", run_id: int | None = None, limit: int = 500,
+    ) -> list[dict]:
+        """Bir (parite, TF, pattern, yön) kombinasyonunun tekil lab trade'lerini
+        (örneklemlerini) döner — skor tablosunda satıra çift tıklayınca gösterilir.
+
+        direction='all' → bull+bear; run_id verilirse yalnız o koşum.
+        d_time'a göre yeniden→eskiye sıralı; her satırda R hesaplı.
+        """
+        from terminal.karakter.score import trade_r
+        sql = ["""SELECT d_time, direction, outcome, entry, entered_price,
+                         stop, tp1, exited_at, htf_trend, htf_aligned
+                  FROM karakter_samples
+                  WHERE symbol=? AND interval=? AND pattern_name=?"""]
+        params: list = [symbol, interval, pattern_name]
+        if direction in ("bull", "bear"):
+            sql.append("AND direction=?")
+            params.append(direction)
+        if run_id is not None:
+            sql.append("AND run_id=?")
+            params.append(run_id)
+        sql.append("ORDER BY d_time DESC LIMIT ?")
+        params.append(limit)
+        cur = self.store._conn.execute(" ".join(sql), params)
+        out: list[dict] = []
+        for (d_time, dirn, outcome, entry, fill, stop, tp1,
+             exited_at, htf_trend, htf_al) in cur.fetchall():
+            out.append({
+                "d_time": int(d_time) if d_time else 0,
+                "direction": dirn,
+                "outcome": outcome,
+                "entry": float(entry),
+                "fill": float(fill) if fill is not None else None,
+                "stop": float(stop),
+                "tp1": float(tp1),
+                "exited_at": int(exited_at) if exited_at else None,
+                "r": round(trade_r(entry, stop, tp1, outcome), 2),
+                "htf_trend": htf_trend,
+                "htf_aligned": (None if htf_al is None else bool(htf_al)),
+            })
+        return out
+
 
 def _row_to_setup(r) -> SetupRow:
     return SetupRow(

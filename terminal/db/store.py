@@ -537,6 +537,52 @@ class Store:
             return None
         return float(row[0] or 0), int(row[1] or 0)
 
+    def reset_karakter(self) -> dict[str, int]:
+        """Karakter lab verisini tamamen sıfırla.
+
+        Siler: karakter_runs / karakter_samples / karakter_scores + bu
+        örneklemlerin ürettiği backtest-kaynaklı (source='backtest')
+        setup_lifecycle satırları ve artık sahipsiz kalan setup/setup_events
+        kayıtları. CANLI veriye (source='live') DOKUNMAZ.
+
+        Returns: silinen satır sayıları (onay/log için).
+        """
+        c = self._conn
+
+        def _count(sql: str, *params) -> int:
+            try:
+                return int(c.execute(sql, params).fetchone()[0])
+            except Exception:
+                return 0
+
+        counts = {
+            "samples": _count("SELECT COUNT(*) FROM karakter_samples"),
+            "runs": _count("SELECT COUNT(*) FROM karakter_runs"),
+            "scores": _count("SELECT COUNT(*) FROM karakter_scores"),
+            "backtest_setups": _count(
+                "SELECT COUNT(*) FROM setup_lifecycle WHERE source='backtest'"),
+        }
+
+        def _exec(sql: str) -> None:
+            try:
+                c.execute(sql)
+            except Exception:
+                pass  # tablo yoksa sessizce geç
+
+        # 1) Backtest-kaynaklı lifecycle → sil; 2) sahipsiz event/setup temizle
+        #    (canlı setupların lifecycle'ı 'live' olduğundan korunur).
+        _exec("DELETE FROM setup_lifecycle WHERE source='backtest'")
+        _exec("DELETE FROM setup_events WHERE setup_id NOT IN "
+              "(SELECT setup_id FROM setup_lifecycle)")
+        _exec("DELETE FROM setups WHERE id NOT IN "
+              "(SELECT setup_id FROM setup_lifecycle)")
+        # 3) Karakter lab tabloları
+        _exec("DELETE FROM karakter_samples")
+        _exec("DELETE FROM karakter_scores")
+        _exec("DELETE FROM karakter_runs")
+        c.commit()
+        return counts
+
     # ---- journal (Faz 7) ----
 
     def upsert_journal(

@@ -274,3 +274,59 @@ def test_run_lab_aligned_with_live_config(store: Store, monkeypatch):
     assert captured.get("target_mode") == "rr1"         # tek 1:1 hedef (canlı)
     assert captured.get("include_abcd") is False         # --no-abcd (canlı)
     assert entry_modes and entry_modes[0] == "limit"     # örneklem limit (PRZ) girişten
+
+
+def test_reset_karakter_wipes_lab_keeps_live(store: Store):
+    """reset_karakter: karakter tablolarını + backtest-kaynaklı setup/lifecycle'ı
+    siler; CANLI (source='live') veriye dokunmaz."""
+    from terminal.karakter.simulator import SimOutcome
+
+    # Lab koşumu + backtest örneklemi (setups + lifecycle source='backtest' üretir)
+    s, _ = _gartley_setup()
+    run_id = store.create_karakter_run(1_700_000_000_000, 1000, ["TEST"], ["60m"])
+    store.add_karakter_sample(run_id, s, SimOutcome("TP", 0, 1, 1, 2, entered_price=s.entry))
+    store.finish_karakter_run(run_id, 1)
+    store.recompute_karakter_scores()
+
+    # CANLI setup + lifecycle (source='live') — korunmalı
+    live, _ = _gartley_setup()
+    live.symbol = "LIVE"
+    live_id = store.upsert_setup(live)
+    store.upsert_lifecycle(setup_id=live_id, state="Aday",
+                           state_changed_at=1_700_000_000_000, source="live")
+    assert store.get_karakter_score("TEST", "60m", "Gartley", "all") is not None
+
+    counts = store.reset_karakter()
+
+    for t in ("karakter_runs", "karakter_samples", "karakter_scores"):
+        assert store._conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] == 0
+    assert store._conn.execute(
+        "SELECT COUNT(*) FROM setup_lifecycle WHERE source='backtest'").fetchone()[0] == 0
+    # canlı setup + lifecycle korundu
+    assert store._conn.execute(
+        "SELECT COUNT(*) FROM setup_lifecycle WHERE setup_id=?", (live_id,)).fetchone()[0] == 1
+    assert store._conn.execute(
+        "SELECT COUNT(*) FROM setups WHERE id=?", (live_id,)).fetchone()[0] == 1
+    assert counts["runs"] == 1 and counts["backtest_setups"] >= 1
+
+
+def test_karakter_samples_for_returns_trades(store: Store):
+    """provider.karakter_samples_for: bir kombinasyonun tekil trade'lerini döner."""
+    from terminal.karakter.simulator import SimOutcome
+    from terminal.ui.data_provider import DataProvider
+
+    s, _ = _gartley_setup()
+    run_id = store.create_karakter_run(1_700_000_000_000, 1000, ["TEST"], ["60m"])
+    store.add_karakter_sample(run_id, s, SimOutcome("TP", 0, 1, 1, 2, entered_price=s.entry))
+    store.add_karakter_sample(run_id, s, SimOutcome("STOP", 0, 1, 1, 2, entered_price=s.entry))
+
+    prov = DataProvider(store)
+    rows = prov.karakter_samples_for(s.symbol, s.interval, s.pattern_name, "all")
+    assert len(rows) == 2
+    assert {r["outcome"] for r in rows} == {"TP", "STOP"}
+    assert all(("r" in r and "entry" in r and "tp1" in r) for r in rows)
+    # run_id filtresi
+    assert len(prov.karakter_samples_for(
+        s.symbol, s.interval, s.pattern_name, "all", run_id=run_id)) == 2
+    assert prov.karakter_samples_for(
+        s.symbol, s.interval, s.pattern_name, "all", run_id=999999) == []
