@@ -115,21 +115,35 @@ class BacktestTab(QWidget):
             source = "DB"
             try:
                 klines = load_db_klines(store, symbol, interval, bars)
-                # DB yetersizse canlı çek + cache'le (sonraki koşum DB'den hızlı)
-                if len(klines) < max(100, int(bars * 0.6)):
-                    client = MexcFuturesClient()
+                # DB istenen aralığı karşılamıyorsa canlı çekmeyi DENE. Başarısız
+                # olursa (ağ/rate-limit) DB'dekiyle devam et — MEXC erişimi olmayan
+                # makinede de (download_history ile doldurulmuş DB) backtest çalışsın.
+                if len(klines) < int(bars * 0.6):
                     try:
-                        klines = client.klines_paginated(symbol, interval, bars, throttle=0.08)
-                    finally:
+                        client = MexcFuturesClient()
                         try:
-                            client.close()
-                        except Exception:
-                            pass
-                    if klines:
-                        store.upsert_klines(symbol, interval, klines)
-                    source = "canlı+cache"
+                            live = client.klines_paginated(symbol, interval, bars, throttle=0.08)
+                        finally:
+                            try:
+                                client.close()
+                            except Exception:
+                                pass
+                        if len(live) > len(klines):
+                            klines = live
+                            store.upsert_klines(symbol, interval, klines)
+                            source = "canlı+cache"
+                    except Exception as e:
+                        log.warning("Canlı çekme başarısız (%s %s): %s — DB'dekiyle devam",
+                                    symbol, interval, e)
+                        if klines:
+                            source = "DB (canlı yok)"
             finally:
                 store.close()
+            if len(klines) < 50:
+                raise RuntimeError(
+                    f"{symbol} {interval} için veri yok (DB boş + canlı çekilemedi). "
+                    f"İndir:  python -m terminal.cli.download_history "
+                    f"--symbols {symbol} --intervals {interval} --days 365")
             result = run_backtest(klines, symbol, interval, entry_mode=mode,
                                   target_mode=target, include_abcd=include_abcd)
             payload = result.to_payload()
