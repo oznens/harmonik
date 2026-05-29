@@ -226,6 +226,7 @@ def _simulate_limit(
     - fill_timeout içinde fiyat entry'ye değmezse → limit dolmaz (EO).
     - Dolum barında stop da değdiyse → STOP (dolup hemen stop; tutucu).
     - TP/STOP önce-STOP (canlı _check_aktif ile tutarlı).
+    - Limit dolmadan TP1 vurulduysa → setup iptal (tükenmiş hareket, EO).
     """
     bull = setup.direction == "bull"
     entry = setup.entry
@@ -235,6 +236,12 @@ def _simulate_limit(
 
     for i in range(n):
         bar = future[i]
+        # TP1 entry'den ÖNCE vurulduysa → hareket bizsiz oldu, geç girme (EO)
+        tp_first = (bull and bar["high"] >= setup.tp1) or (not bull and bar["low"] <= setup.tp1)
+        if tp_first:
+            return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                              exited_idx=i, exited_time=bar["open_time"],
+                              entered_price=None)
         touched = (bull and bar["low"] <= entry) or (not bull and bar["high"] >= entry)
         if touched:
             entered_idx = i

@@ -58,6 +58,23 @@ def _capture():
     return seen, (lambda t: seen.append(t))
 
 
+def test_aday_cancelled_when_tp_before_entry(store: Store):
+    """Pasif/limit girişte: ADAY iken fiyat entry'ye değmeden TP1'e ulaşırsa →
+    EO (tükenmiş hareket, geç girme). Grafikteki CROUSDT senaryosu."""
+    s, sid, klines = _bull_setup(store)
+    d_time = klines[-1]["open_time"]
+    store.upsert_lifecycle(sid, ADAY, state_changed_at=d_time)
+    tr = LifecycleTracker(SYMBOL, INTERVAL, store)
+    # Entry'ye değmeyen (low > entry) ama TP1'i geçen (high >= tp1) bar
+    bar = {"open_time": d_time + INTERVAL_MS, "close_time": d_time + 2 * INTERVAL_MS - 1,
+           "open": s.entry + 1, "high": s.tp1 + 1, "low": s.entry + 0.5,
+           "close": s.tp1, "volume": 100.0, "quote_volume": 1000.0}
+    tr.advance([bar])
+    row = store.get_lifecycle(sid)
+    assert row["state"] == "EO"
+    assert row["exit_reason"] == "tp_before_entry"
+
+
 def test_reconcile_catches_missed_stop(store: Store):
     s, sid, klines = _bull_setup(store)
     entered = klines[-1]["open_time"]
