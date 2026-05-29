@@ -75,6 +75,7 @@ class PairWorker:
         paper_min_confluence: int = 0,
         paper_entry_mode: str = "market",
         min_time_symmetry: float = 0.0,
+        target_mode: str = "structural",
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -100,6 +101,9 @@ class PairWorker:
         self.paper_entry_mode = paper_entry_mode
         # Yapısal filtre #2: AB/CD zaman simetrisi < eşik → paper'a açma (0=kapalı).
         self.min_time_symmetry = min_time_symmetry
+        # Hedef (TP) modeli: "structural" (TP1=B/TP2=A) veya "rr1" (terminalMiraz
+        # referansı: tek sabit 1:1 R:R hedef). scan_klines'a iletilir.
+        self.target_mode = target_mode
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -370,7 +374,8 @@ class PairWorker:
         self._fill_pending_entries(klines[-1])
         htf_klines = self._fetch_htf()
         setups = scan_klines(klines, self.symbol, self.interval,
-                             zigzag_threshold=self.threshold, htf_klines=htf_klines)
+                             zigzag_threshold=self.threshold, htf_klines=htf_klines,
+                             target_mode=self.target_mode)
         for s in setups:
             sid = self.store.upsert_setup(s)
             if self.store.get_lifecycle(sid) is None:
@@ -561,6 +566,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--paper-min-confluence", type=int, default=0,
                         help="Paper'a SADECE confluence >= bu eşik olan setupları aç "
                              "(0 = filtre yok). Veri: <50 zarar, 50-69 edge → 50 önerilir.")
+    parser.add_argument("--target-mode", choices=["structural", "rr1"], default="structural",
+                        help="Hedef (TP) modeli: structural=TP1=B/TP2=A (varsayılan), "
+                             "rr1=terminalMiraz referansı (tek sabit 1:1 R:R hedef)")
     parser.add_argument("--paper-entry-mode", choices=["market", "limit"], default="market",
                         help="market: agresif, sonraki bar açılışından dolum (slippage'lı). "
                              "limit: pasif, fiyat entry'ye değince TAM entry'den dolum.")
@@ -649,6 +657,7 @@ def main(argv: list[str] | None = None) -> int:
             paper_min_confluence=args.paper_min_confluence,
             paper_entry_mode=args.paper_entry_mode,
             min_time_symmetry=args.min_time_symmetry,
+            target_mode=args.target_mode,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)

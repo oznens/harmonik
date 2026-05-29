@@ -35,15 +35,16 @@ class BacktestBridge(QObject):
     resultReady = Signal(str)   # backtest payload (JSON)
     failed = Signal(str)
     pageReady = Signal()
-    requested = Signal(str, str, int, str)  # symbol, interval, days, mode
+    requested = Signal(str, str, int, str, str)  # symbol, interval, days, mode, target
 
     @Slot()
     def ready(self) -> None:
         self.pageReady.emit()
 
-    @Slot(str, str, int, str)
-    def requestBacktest(self, symbol: str, interval: str, days: int, mode: str) -> None:
-        self.requested.emit(symbol, interval, days, mode)
+    @Slot(str, str, int, str, str)
+    def requestBacktest(self, symbol: str, interval: str, days: int,
+                        mode: str, target: str) -> None:
+        self.requested.emit(symbol, interval, days, mode, target)
 
 
 class _TaskSignals(QObject):
@@ -103,8 +104,9 @@ class BacktestTab(QWidget):
         self._tasks.add(task)
         self._pool.start(task)
 
-    @Slot(str, str, int, str)
-    def _on_request(self, symbol: str, interval: str, days: int, mode: str) -> None:
+    @Slot(str, str, int, str, str)
+    def _on_request(self, symbol: str, interval: str, days: int,
+                    mode: str, target: str) -> None:
         bars = min(_MAX_BARS, max(200, days * _BARS_PER_DAY.get(interval, 24)))
 
         def work():
@@ -127,10 +129,12 @@ class BacktestTab(QWidget):
                     source = "canlı+cache"
             finally:
                 store.close()
-            result = run_backtest(klines, symbol, interval, entry_mode=mode)
+            result = run_backtest(klines, symbol, interval, entry_mode=mode,
+                                  target_mode=target)
             payload = result.to_payload()
             payload["source"] = source
             payload["bars_used"] = len(klines)
+            payload["target_mode"] = target
             return json.dumps(payload)
 
         self._run(

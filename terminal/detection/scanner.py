@@ -51,6 +51,7 @@ def scan_klines(
     zigzag_threshold: float | None = None,
     htf_klines: list[dict[str, Any]] | None = None,
     min_rr: float = 1.0,
+    target_mode: str = "structural",
 ) -> list[Setup]:
     """Mum dizisinden formasyonları çıkar; opsiyonel HTF ile Q skoru hesapla.
 
@@ -61,6 +62,9 @@ def scan_klines(
         zigzag_threshold: özelse yüzde (örn. 0.02). Yoksa interval varsayılanı.
         htf_klines: üst zaman dilimi mum dizisi (HTF trend için). Yoksa
                     Q skorunda HTF bileşeni 0 olur, elenen tespiti yapılmaz.
+        target_mode: hedef (TP) modeli — "structural" (varsayılan: TP1=B,
+            TP2=A yapısal swing'ler, değişken R:R) veya "rr1" (terminalMiraz
+            referans modeli: tek sabit 1:1 R:R hedef, TP1=Entry∓1R, TP2=∓2R).
 
     Returns:
         Setup listesi (Q skoru ve HTF bilgisi doldurulmuş).
@@ -105,6 +109,7 @@ def scan_klines(
         )
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        _apply_target_mode(setup, target_mode)
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
@@ -127,6 +132,7 @@ def scan_klines(
             continue
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        _apply_target_mode(setup, target_mode)
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
@@ -148,6 +154,7 @@ def scan_klines(
             continue
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        _apply_target_mode(setup, target_mode)
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
@@ -169,6 +176,7 @@ def scan_klines(
             continue
         _finalize(setup, htf_trend)
         _normalize_sl(setup)
+        _apply_target_mode(setup, target_mode)
         if not _has_valid_rr(setup, min_rr):
             continue
         _apply_confluence(setup, klines)
@@ -218,6 +226,28 @@ def _normalize_sl(setup: Setup) -> None:
         setup.stop = setup.entry * (1 - MIN_SL_PCT)
     else:
         setup.stop = setup.entry * (1 + MIN_SL_PCT)
+
+
+def _apply_target_mode(setup: Setup, target_mode: str) -> None:
+    """Hedef (TP) modelini setup'a uygula (in-place). _normalize_sl SONRASI çağır.
+
+    "structural" (varsayılan): pattern-spesifik yapısal hedefler (TP1=B, TP2=A
+        XABCD'de; AB=CD/Shark/Cypher kendi swing'leri). Değişken R:R.
+    "rr1": terminalMiraz referans modeli — TEK sabit 1:1 R:R hedef.
+        Hedef = Entry ∓ 1×|Stop−Entry|. TP1=1R (referansın "Hedef"i), TP2=2R
+        (genişletilmiş/runner, bilgi amaçlı). Tüm pattern aileleri için aynı.
+        Referans örnekleri: ARB short E0.11289/SL0.11674→H0.10904 (risk=ödül),
+        FIL short E1.07615/SL1.13739→H1.01491, DYDX long E0.13876/SL0.12704→H0.15047.
+    """
+    if target_mode != "rr1":
+        return
+    sign = -1 if setup.direction == "bull" else 1
+    risk = abs(setup.stop - setup.entry)
+    if risk <= 0:
+        return
+    # sign=-1 (bull) → hedef yukarı (entry+risk); sign=+1 (bear) → aşağı (entry−risk)
+    setup.tp1 = setup.entry - sign * risk
+    setup.tp2 = setup.entry - sign * 2.0 * risk
 
 
 def time_symmetry(setup: Setup) -> float:
