@@ -76,6 +76,7 @@ class PairWorker:
         paper_entry_mode: str = "market",
         min_time_symmetry: float = 0.0,
         target_mode: str = "structural",
+        include_abcd: bool = True,
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -104,6 +105,8 @@ class PairWorker:
         # Hedef (TP) modeli: "structural" (TP1=B/TP2=A) veya "rr1" (terminalMiraz
         # referansı: tek sabit 1:1 R:R hedef). scan_klines'a iletilir.
         self.target_mode = target_mode
+        # False ise standalone AB=CD ailesi taranmaz (yalnızca gerçek harmonikler).
+        self.include_abcd = include_abcd
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -375,7 +378,7 @@ class PairWorker:
         htf_klines = self._fetch_htf()
         setups = scan_klines(klines, self.symbol, self.interval,
                              zigzag_threshold=self.threshold, htf_klines=htf_klines,
-                             target_mode=self.target_mode)
+                             target_mode=self.target_mode, include_abcd=self.include_abcd)
         for s in setups:
             sid = self.store.upsert_setup(s)
             if self.store.get_lifecycle(sid) is None:
@@ -569,6 +572,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-mode", choices=["structural", "rr1"], default="structural",
                         help="Hedef (TP) modeli: structural=TP1=B/TP2=A (varsayılan), "
                              "rr1=terminalMiraz referansı (tek sabit 1:1 R:R hedef)")
+    parser.add_argument("--no-abcd", action="store_true",
+                        help="Standalone AB=CD ailesini tarama — yalnızca gerçek "
+                             "harmonikler (Gartley/Bat/Butterfly/Crab/Shark/Cypher)")
     parser.add_argument("--paper-entry-mode", choices=["market", "limit"], default="market",
                         help="market: agresif, sonraki bar açılışından dolum (slippage'lı). "
                              "limit: pasif, fiyat entry'ye değince TAM entry'den dolum.")
@@ -658,6 +664,7 @@ def main(argv: list[str] | None = None) -> int:
             paper_entry_mode=args.paper_entry_mode,
             min_time_symmetry=args.min_time_symmetry,
             target_mode=args.target_mode,
+            include_abcd=not args.no_abcd,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)

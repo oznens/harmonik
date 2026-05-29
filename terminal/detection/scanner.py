@@ -52,6 +52,7 @@ def scan_klines(
     htf_klines: list[dict[str, Any]] | None = None,
     min_rr: float = 1.0,
     target_mode: str = "structural",
+    include_abcd: bool = True,
 ) -> list[Setup]:
     """Mum dizisinden formasyonları çıkar; opsiyonel HTF ile Q skoru hesapla.
 
@@ -65,6 +66,10 @@ def scan_klines(
         target_mode: hedef (TP) modeli — "structural" (varsayılan: TP1=B,
             TP2=A yapısal swing'ler, değişken R:R) veya "rr1" (terminalMiraz
             referans modeli: tek sabit 1:1 R:R hedef, TP1=Entry∓1R, TP2=∓2R).
+        include_abcd: False ise standalone AB=CD (4-nokta) ailesi taranmaz —
+            yalnızca gerçek 5-nokta harmonikler (Gartley/Bat/Butterfly/Crab/
+            Shark/Cypher) kalır. AB=CD en gürültülü + en zayıf aile; referans
+            terminalMiraz da kullanmıyor.
 
     Returns:
         Setup listesi (Q skoru ve HTF bilgisi doldurulmuş).
@@ -116,27 +121,28 @@ def scan_klines(
         setups.append(setup)
         seen_keys.add((m.spec.name, q.x.time, q.a.time, q.b.time, q.c.time, q.d.time))
 
-    # 2) 4-pivot pencerelerde standalone AB=CD
-    for i in range(len(pivots) - 3):
-        m_abcd = match_abcd(pivots[i:i + 4])
-        if m_abcd is None:
-            continue
-        setup = build_abcd_setup(m_abcd, symbol, interval)
-        setup.detected_at = detected_at
-        setup.htf_interval = htf_interval
-        setup.htf_trend = htf_trend
-        # Aynı pivotları XABCD olarak da eşleşmişse atla (XABCD'nin parçası zaten)
-        key = ("ABCD", setup.pivots["A"].time, setup.pivots["B"].time,
-               setup.pivots["C"].time, setup.pivots["D"].time)
-        if any(k[2:] == key[1:] for k in seen_keys):
-            continue
-        _finalize(setup, htf_trend)
-        _normalize_sl(setup)
-        _apply_target_mode(setup, target_mode)
-        if not _has_valid_rr(setup, min_rr):
-            continue
-        _apply_confluence(setup, klines)
-        setups.append(setup)
+    # 2) 4-pivot pencerelerde standalone AB=CD (include_abcd=False ise atla)
+    if include_abcd:
+        for i in range(len(pivots) - 3):
+            m_abcd = match_abcd(pivots[i:i + 4])
+            if m_abcd is None:
+                continue
+            setup = build_abcd_setup(m_abcd, symbol, interval)
+            setup.detected_at = detected_at
+            setup.htf_interval = htf_interval
+            setup.htf_trend = htf_trend
+            # Aynı pivotları XABCD olarak da eşleşmişse atla (XABCD'nin parçası zaten)
+            key = ("ABCD", setup.pivots["A"].time, setup.pivots["B"].time,
+                   setup.pivots["C"].time, setup.pivots["D"].time)
+            if any(k[2:] == key[1:] for k in seen_keys):
+                continue
+            _finalize(setup, htf_trend)
+            _normalize_sl(setup)
+            _apply_target_mode(setup, target_mode)
+            if not _has_valid_rr(setup, min_rr):
+                continue
+            _apply_confluence(setup, klines)
+            setups.append(setup)
 
     # 3) 5-pivot pencerelerde Shark (0-X-A-B-C, farklı kural)
     for i in range(len(pivots) - 4):

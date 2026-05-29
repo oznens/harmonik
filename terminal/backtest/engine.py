@@ -71,18 +71,20 @@ def run_backtest(
     zigzag: float | None = None,
     min_rr: float = 1.0,
     target_mode: str = "structural",
+    include_abcd: bool = True,
 ) -> BacktestResult:
     """Mum dizisi üzerinde backtest çalıştır → grafik + istatistik verisi.
 
     target_mode: "structural" (TP1=B/TP2=A yapısal) veya "rr1" (terminalMiraz
         referans: tek sabit 1:1 R:R hedef). Grafikte iki modeli karşılaştırmak için.
+    include_abcd: False ise standalone AB=CD'yi tarama (sadece harmonikler).
     """
     if not klines:
         return BacktestResult(symbol, interval, entry_mode, [], [], [], {})
 
     threshold = zigzag if zigzag is not None else default_threshold(interval)
     setups = scan_klines(klines, symbol, interval, zigzag_threshold=threshold,
-                         min_rr=min_rr, target_mode=target_mode)
+                         min_rr=min_rr, target_mode=target_mode, include_abcd=include_abcd)
 
     idx_of = {k["open_time"]: i for i, k in enumerate(klines)}
     raw_trades: list[dict[str, Any]] = []
