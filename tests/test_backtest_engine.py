@@ -70,3 +70,20 @@ def test_run_backtest_entry_modes_differ():
     limit = run_backtest(kl, "BTCUSDT", "60m", entry_mode="limit", min_rr=0.0)
     # İki mod da çalışır; market girer (sonraki bar), limit fiyat entry'ye dönmezse EO
     assert market.stats["n_setups"] == limit.stats["n_setups"]
+
+
+def test_setups_drawn_even_when_no_trades():
+    """İşlem dolmasa bile tespit edilen setuplar grafikte çizilir (boş kalmasın)."""
+    kl = _klines_with_tp_tail()
+    r = run_backtest(kl, "BTCUSDT", "60m", entry_mode="limit", min_rr=0.0)
+    assert r.stats["n_setups"] >= 1
+    assert "eo" in r.stats and "n_detected" in r.stats
+    # Her işlem 'faint' bayrağı taşır; dolmayanlar giriş/çıkış oku olmadan çizilir
+    for t in r.trades:
+        assert "faint" in t
+        labels = {p["label"] for p in t["pivots"]}
+        assert {"X", "A", "B", "C", "D"} <= labels   # XABCD her zaman çizili
+        if t["faint"]:
+            assert "entry" not in t and "exit" not in t
+    # Çizilen setup sayısı en az tespit edilen kadar (dolan + soluk)
+    assert len(r.trades) >= r.stats["n_detected"] >= 1

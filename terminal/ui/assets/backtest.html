@@ -98,18 +98,28 @@ function render(d){
   const markers = [];
   for(const t of (d.trades || [])){
     const bull = t.direction === "bull";
-    // XABCD çizgisi (her işlem için ayrı seri — hepsi hep çizili)
+    const faint = !!t.faint;   // dolmayan/alınmayan setup → soluk çizim
+    // XABCD çizgisi (her setup için ayrı seri — dolan altın, dolmayan gri)
     const pts = (t.pivots||[]).slice().sort((a,b)=>a.time-b.time).map(p=>({time:p.time,value:p.value}));
     if(pts.length>=2){
-      const ls = priceChart.addLineSeries({ color:"rgba(212,167,44,0.55)", lineWidth:1,
+      const ls = priceChart.addLineSeries({
+        color: faint ? "rgba(136,136,148,0.28)" : "rgba(212,167,44,0.6)", lineWidth:1,
         lastValueVisible:false, priceLineVisible:false, lineStyle:LWC.LineStyle.Dashed });
       ls.setData(pts); tradeSeries.push(ls);
     }
     // Pivot etiketleri
     for(const p of (t.pivots||[])){
-      markers.push({ time:p.time, position:"inBar", color:"#d4a72c", shape:"circle", text:p.label });
+      markers.push({ time:p.time, position:"inBar",
+        color: faint?"#5a5d65":"#d4a72c", shape:"circle", text:p.label });
     }
-    // Giriş + çıkış okları
+    if(faint){
+      // Dolmadı → D pivotunda küçük sonuç etiketi (EO/ZI vs.)
+      const dp = (t.pivots||[]).slice(-1)[0];
+      if(dp) markers.push({ time:dp.time, position: bull?"aboveBar":"belowBar",
+        color:"#7d8088", shape:"circle", text:t.outcome });
+      continue;
+    }
+    // Giriş + çıkış okları (yalnızca dolan işlemler)
     if(t.entry) markers.push({ time:t.entry.time, position: bull?"belowBar":"aboveBar",
       color:"#42a5f5", shape: bull?"arrowUp":"arrowDown", text:"giriş" });
     if(t.exit){
@@ -131,6 +141,7 @@ function render(d){
     `<span><span class="k">P&L</span> ${sign}$${(s.total_pnl||0).toFixed(0)} (${sign}${(s.pnl_pct||0).toFixed(1)}%)</span>`+
     `<span><span class="k">maxDD</span> ${(s.max_drawdown_pct||0).toFixed(1)}%</span>`+
     `<span><span class="k">TP/STOP</span> ${s.tp||0}/${s.stop||0}</span>`+
+    `<span><span class="k">EO</span> ${s.eo||0}</span>`+
     `<span><span class="k">setup</span> ${s.n_setups||0}</span>`+
     `<span><span class="k">hedef</span> ${d.target_mode==="rr1"?"1R":(d.target_mode||"yapısal")}</span>`+
     `<span><span class="k">kaynak</span> ${d.source||"-"} (${d.bars_used||s.n_candles||0} mum)</span>`;

@@ -219,17 +219,23 @@ def _simulate_limit(
     fill_timeout: int,
     aktif_timeout: int,
 ) -> SimOutcome:
-    """LİMİT giriş: D/entry fiyatına limit emir konur, fiyat değince TAM entry'den dolar.
+    """LİMİT giriş: PRZ bölgesine limit emir — fiyat ZONE'a değince entry'den dolar.
 
-    Klasik harmonik execution (Carney: PRZ'de limit). Slippage YOK — dolum = entry.
-    - Bull: fiyat entry'ye iner (low <= entry) → dol. Bear: high >= entry.
-    - fill_timeout içinde fiyat entry'ye değmezse → limit dolmaz (EO).
-    - Dolum barında stop da değdiyse → STOP (dolup hemen stop; tutucu).
+    Klasik harmonik execution (Carney: PRZ'de limit). Önceki "tam D tepesi"
+    dolumu canlıda neredeyse hiç dolmuyordu (D dönüş noktası; fiyat tam tepeye
+    geri gelmiyor → hep EO). Referans terminalMiraz'ın "D ZONE" mantığı: fiyat
+    PRZ bölgesine girince marketable limit ~entry'den dolar.
+    - Bull: fiyat PRZ üst kenarına iner (low <= prz_high) → dol (fiyat zaten
+      entry civarında; marketable limit entry'den dolar). Bear: high >= prz_low.
+    - fill_timeout içinde bölgeye değmezse → EO.
+    - TP1 dolumdan ÖNCE vurulduysa → setup iptal (tükenmiş hareket, EO).
     - TP/STOP önce-STOP (canlı _check_aktif ile tutarlı).
-    - Limit dolmadan TP1 vurulduysa → setup iptal (tükenmiş hareket, EO).
     """
     bull = setup.direction == "bull"
     entry = setup.entry
+    # PRZ zone yakın kenarı (fiyatın bölgeye girdiği eşik). prz bozuksa entry'e düş.
+    zone_hi = max(setup.prz_high, entry)   # bull: yukarı kenar
+    zone_lo = min(setup.prz_low, entry)    # bear: aşağı kenar
     n = len(future)
     entered_idx: int | None = None
     entered_time: int | None = None
@@ -242,7 +248,7 @@ def _simulate_limit(
             return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
                               exited_idx=i, exited_time=bar["open_time"],
                               entered_price=None)
-        touched = (bull and bar["low"] <= entry) or (not bull and bar["high"] >= entry)
+        touched = (bull and bar["low"] <= zone_hi) or (not bull and bar["high"] >= zone_lo)
         if touched:
             entered_idx = i
             entered_time = bar["open_time"]

@@ -271,16 +271,17 @@ class LifecycleTracker:
 
     def _check_aday(self, setup: Setup, setup_id: int,
                     h: float, l: float, t: int, bars_since_d: int) -> Transition | None:
-        # Carney'nin tutucu girişi: D ideal seviyesinde tetik
-        #   Bull setup: bar.low <= setup.entry (D ideal, 0.786 XA gibi)
-        #   Bear setup: bar.high >= setup.entry
-        # Bu, "PRZ tam test edildi + tanımlayıcı limit dokunuldu" anlamına gelir.
+        # PRZ-zone giriş (referans "D ZONE"): fiyat PRZ bölgesine girince tetik.
+        # Eski "tam D tepesi" (l<=entry) canlıda neredeyse hiç dolmuyordu — D bir
+        # dönüş noktası, fiyat tepeye geri gelmiyor → hep EO. Artık bölge kenarı:
+        #   Bull: bar.low <= prz_high   Bear: bar.high >= prz_low
+        # Dolum fiyatı yine entry (bölge içi marketable limit ~entry'den dolar).
         if setup.direction == "bull":
             tp_first = h >= setup.tp1
-            triggered = l <= setup.entry
+            triggered = l <= max(setup.prz_high, setup.entry)
         else:
             tp_first = l <= setup.tp1
-            triggered = h >= setup.entry
+            triggered = h >= min(setup.prz_low, setup.entry)
         # Limit dolmadan TP1 vurulduysa → hareket bizsiz oldu (tükendi). Geri
         # çekilmede girmek riskli → setup'ı İPTAL et (giriş yok).
         if tp_first:

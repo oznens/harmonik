@@ -89,6 +89,7 @@ def run_backtest(
     idx_of = {k["open_time"]: i for i, k in enumerate(klines)}
     raw_trades: list[dict[str, Any]] = []
     setup_by_open: dict[int, Any] = {}   # giriş zamanı → setup (pivot çizimi için)
+    sims: list[tuple[Any, Any]] = []     # (setup, outcome) — TÜM simüle edilen setuplar
 
     for s in setups:
         if s.elenen:
@@ -98,8 +99,9 @@ def run_backtest(
             continue
         future = klines[d_idx + 1:]
         o = simulate_outcome(s, future, entry_mode=entry_mode)
+        sims.append((s, o))
         if o.entered_price is None or o.exited_time is None:
-            continue  # girilmedi (EO) ya da kapanmadı
+            continue  # girilmedi (EO) ya da kapanmadı → portföye girmez
         raw_trades.append({
             "symbol": s.symbol, "interval": s.interval, "pattern": s.pattern_name,
             "direction": s.direction, "ideal_entry": s.entry, "stop": s.stop,
@@ -113,25 +115,46 @@ def run_backtest(
 
     pf = simulate_portfolio(raw_trades)
 
-    # Portföyün GERÇEKTEN aldığı işlemleri (pf.closed) pivotlarıyla çiz
+    def _pivots(s) -> list[dict[str, Any]]:
+        out = []
+        for letter in _PIVOT_LETTERS:
+            p = s.pivots.get(letter)
+            if p is not None:
+                out.append({"time": _sec(p.time), "value": p.price, "label": letter})
+        return out
+
+    # Portföyün GERÇEKTEN aldığı işlemleri (pf.closed) pivotlarıyla TAM çiz
     trades: list[dict[str, Any]] = []
+    taken: set[int] = set()
     for c in pf.closed:
         so = setup_by_open.get(c["open_time"])
         if so is None:
             continue
         s, o = so
-        pivots = []
-        for letter in _PIVOT_LETTERS:
-            p = s.pivots.get(letter)
-            if p is not None:
-                pivots.append({"time": _sec(p.time), "value": p.price, "label": letter})
+        taken.add(c["open_time"])
         trades.append({
             "pattern": s.pattern_name, "direction": s.direction,
-            "outcome": c["outcome"], "pnl": c["pnl"],
-            "pivots": pivots,
+            "outcome": c["outcome"], "pnl": c["pnl"], "faint": False,
+            "pivots": _pivots(s),
             "entry": {"time": _sec(o.entered_time), "price": o.entered_price},
             "exit": {"time": _sec(o.exited_time or 0),
                      "price": _exit_price(s, c["outcome"])},
+            "stop": s.stop, "tp1": s.tp1, "entry_level": s.entry,
+        })
+
+    # Dolmayan / portföyün almadığı setuplar — SOLUK çiz (XABCD + EO/sonuç etiketi)
+    # "setup var ama işlem yok" durumunda grafik boş kalmasın diye.
+    eo = 0
+    for s, o in sims:
+        if o.entered_price is None:
+            eo += 1
+        if (o.entered_price is not None and o.exited_time is not None
+                and o.entered_time in taken):
+            continue   # zaten tam çizildi
+        trades.append({
+            "pattern": s.pattern_name, "direction": s.direction,
+            "outcome": o.outcome, "pnl": 0.0, "faint": True,
+            "pivots": _pivots(s),
             "stop": s.stop, "tp1": s.tp1, "entry_level": s.entry,
         })
 
@@ -141,7 +164,7 @@ def run_backtest(
         "win_rate": pf.win_rate, "total_pnl": pf.total_pnl, "pnl_pct": pf.pnl_pct,
         "max_drawdown_pct": pf.max_drawdown_pct, "final_equity": pf.final_equity,
         "initial_equity": pf.initial_equity, "n_setups": len(setups),
-        "skipped_busy": pf.skipped_busy,
+        "skipped_busy": pf.skipped_busy, "eo": eo, "n_detected": len(sims),
     }
     candles = [
         {"time": _sec(k["open_time"]), "open": k["open"], "high": k["high"],
