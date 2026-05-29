@@ -35,16 +35,16 @@ class BacktestBridge(QObject):
     resultReady = Signal(str)   # backtest payload (JSON)
     failed = Signal(str)
     pageReady = Signal()
-    requested = Signal(str, str, int, str, str)  # symbol, interval, days, mode, target
+    requested = Signal(str, str, int, str, str, str)  # symbol, interval, days, mode, target, abcd
 
     @Slot()
     def ready(self) -> None:
         self.pageReady.emit()
 
-    @Slot(str, str, int, str, str)
+    @Slot(str, str, int, str, str, str)
     def requestBacktest(self, symbol: str, interval: str, days: int,
-                        mode: str, target: str) -> None:
-        self.requested.emit(symbol, interval, days, mode, target)
+                        mode: str, target: str, abcd: str) -> None:
+        self.requested.emit(symbol, interval, days, mode, target, abcd)
 
 
 class _TaskSignals(QObject):
@@ -104,10 +104,11 @@ class BacktestTab(QWidget):
         self._tasks.add(task)
         self._pool.start(task)
 
-    @Slot(str, str, int, str, str)
+    @Slot(str, str, int, str, str, str)
     def _on_request(self, symbol: str, interval: str, days: int,
-                    mode: str, target: str) -> None:
+                    mode: str, target: str, abcd: str) -> None:
         bars = min(_MAX_BARS, max(200, days * _BARS_PER_DAY.get(interval, 24)))
+        include_abcd = abcd == "all"   # "harmonic" → AB=CD hariç (canlıyla aynı)
 
         def work():
             store = Store(self._db_path)   # worker thread'e ait bağlantı
@@ -130,11 +131,12 @@ class BacktestTab(QWidget):
             finally:
                 store.close()
             result = run_backtest(klines, symbol, interval, entry_mode=mode,
-                                  target_mode=target)
+                                  target_mode=target, include_abcd=include_abcd)
             payload = result.to_payload()
             payload["source"] = source
             payload["bars_used"] = len(klines)
             payload["target_mode"] = target
+            payload["abcd"] = abcd
             return json.dumps(payload)
 
         self._run(

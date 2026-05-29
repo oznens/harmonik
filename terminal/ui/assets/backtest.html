@@ -45,12 +45,16 @@
     </select>
     <select id="mode" title="Giriş modu">
       <option value="market" selected>market (D'den)</option>
-      <option value="limit">limit (entry'den)</option>
+      <option value="limit">limit (PRZ zone)</option>
       <option value="confirm">onaylı (BOS)</option>
     </select>
     <select id="target" title="Hedef modeli">
       <option value="structural" selected>hedef: yapısal (B/A)</option>
       <option value="rr1">hedef: 1R (terminalMiraz)</option>
+    </select>
+    <select id="abcd" title="Pattern seti">
+      <option value="harmonic" selected>sadece harmonik</option>
+      <option value="all">tüm patternler (+AB=CD)</option>
     </select>
     <button id="run">Backtest Çalıştır</button>
     <div id="stats"></div>
@@ -144,6 +148,7 @@ function render(d){
     `<span><span class="k">EO</span> ${s.eo||0}</span>`+
     `<span><span class="k">setup</span> ${s.n_setups||0}</span>`+
     `<span><span class="k">hedef</span> ${d.target_mode==="rr1"?"1R":(d.target_mode||"yapısal")}</span>`+
+    `<span><span class="k">set</span> ${d.abcd==="all"?"tüm":"harmonik"}</span>`+
     `<span><span class="k">kaynak</span> ${d.source||"-"} (${d.bars_used||s.n_candles||0} mum)</span>`;
 }
 
@@ -153,7 +158,7 @@ function runBacktest(){
   el("run").disabled = true;
   showStatus("Backtest çalışıyor… (veri çekiliyor + simülasyon)");
   bridge.requestBacktest(el("symbol").value.toUpperCase(), el("interval").value,
-    parseInt(el("range").value,10), el("mode").value, el("target").value);
+    parseInt(el("range").value,10), el("mode").value, el("target").value, el("abcd").value);
 }
 el("run").addEventListener("click", runBacktest);
 
