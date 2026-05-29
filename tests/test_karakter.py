@@ -121,9 +121,10 @@ def test_simulate_ambiguous_close_below_entry_is_stop():
     assert o.ambiguous is True
 
 
-def test_simulate_ambiguous_close_above_entry_is_tp():
-    """Aynı bar TP+SL touch + close ENTRY'nin ÜSTÜNDE → TP (kazançta kapandı,
-    XRPUSDT 1d rally bar tipindeki yanlış STOP'ları düzeltir)."""
+def test_simulate_ambiguous_always_stop_matches_live():
+    """Aynı bar TP+SL touch → close yukarıda OLSA BİLE STOP (canlı _check_aktif
+    ile tutarlı: bar içi sıra bilinmez, tutucu STOP). Backtest WR'si canlı paper
+    ile karşılaştırılabilir olsun diye."""
     s, _ = _gartley_setup()
     base_t = 1_700_000_000_000
     future = [
@@ -132,11 +133,11 @@ def test_simulate_ambiguous_close_above_entry_is_tp():
          "volume": 100, "quote_volume": 1000},
         {"open_time": base_t + 3_600_000, "close_time": base_t + 7_199_999,
          "open": s.entry, "high": s.tp1 + 0.5, "low": s.stop - 0.5,
-         "close": s.entry + (s.tp1 - s.entry) * 0.5,  # close TP yarısında
+         "close": s.entry + (s.tp1 - s.entry) * 0.5,  # close TP yarısında ama yine STOP
          "volume": 100, "quote_volume": 1000},
     ]
     o = simulate_outcome(s, future, force_immediate_entry=False)
-    assert o.outcome == "TP"
+    assert o.outcome == "STOP"
     assert o.ambiguous is True
 
 
