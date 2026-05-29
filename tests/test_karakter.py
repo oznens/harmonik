@@ -219,3 +219,58 @@ def test_recompute_clears_old_scores(store: Store):
     store._conn.execute("DELETE FROM karakter_samples")
     store.recompute_karakter_scores()
     assert store.get_karakter_score("TEST", "60m", "Gartley", "all") is None
+
+
+def test_run_lab_aligned_with_live_config(store: Store, monkeypatch):
+    """run_lab varsayılanları CANLI sistemle aynı olmalı: scan rr1 + AB=CD'siz,
+    karakter örneklemi limit (PRZ) girişten. (Karakter Skoru canlıyı yansıtsın.)"""
+    import terminal.karakter.runner as runner
+    from terminal.data.mexc_client import MexcError
+    from terminal.detection.models import Pivot, Setup
+    from terminal.karakter.simulator import SimOutcome
+
+    step, base = 3_600_000, 1_700_000_000_000
+    bars = [{"open_time": base + i * step, "close_time": base + i * step + step - 1,
+             "open": 100.0 + i, "high": 100.5 + i, "low": 99.5 + i, "close": 100.0 + i,
+             "volume": 100.0, "quote_volume": 1e4} for i in range(200)]
+
+    class FakeClient:
+        def klines_paginated(self, symbol, interval, total_bars, throttle=0.0, **kw):
+            if interval == "60m":
+                return bars
+            raise MexcError("HTF yok (test)")   # HTF → None (test basit kalsın)
+
+    captured: dict = {}
+
+    def fake_scan(klines, symbol, interval, **kw):
+        captured.update(kw)
+        def piv(i, price):
+            return Pivot(index=i, time=bars[i]["open_time"], price=price, kind="L")
+        s = Setup(symbol=symbol, interval=interval, pattern_name="Gartley",
+                  direction="bull",
+                  pivots={"X": piv(0, 100.0), "A": piv(2, 103.0), "B": piv(5, 101.0),
+                          "C": piv(8, 104.0), "D": piv(10, 100.0)},
+                  b_ratio=0.6, c_ratio=0.5, d_ratio=0.786, bc_proj=1.27,
+                  cd_ab_ratio=1.0, ab_cd_equivalent=False,
+                  prz_low=99.5, prz_high=100.5, prz_components=[("x", 100.0)],
+                  entry=100.0, stop=98.0, tp1=104.0, tp2=106.0,
+                  detected_at=bars[10]["open_time"])
+        s.elenen = False
+        return [s]
+
+    entry_modes: list = []
+
+    def fake_sim(setup, future, **kw):
+        entry_modes.append(kw.get("entry_mode"))
+        return SimOutcome("TP", entered_idx=0, entered_time=future[0]["open_time"],
+                          exited_idx=1, exited_time=future[1]["open_time"],
+                          entered_price=100.0)
+
+    monkeypatch.setattr(runner, "scan_klines", fake_scan)
+    monkeypatch.setattr(runner, "simulate_outcome", fake_sim)
+
+    run_id = runner.run_lab(["BTCUSDT"], ["60m"], 200, store, FakeClient())
+    assert run_id > 0
+    assert captured.get("target_mode") == "rr1"         # tek 1:1 hedef (canlı)
+    assert captured.get("include_abcd") is False         # --no-abcd (canlı)
+    assert entry_modes and entry_modes[0] == "limit"     # örneklem limit (PRZ) girişten

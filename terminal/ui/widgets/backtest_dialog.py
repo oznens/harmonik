@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QPushButton, QSpinBox, QTextEdit, QVBoxLayout,
 )
 
-from terminal.data.mexc_client import MexcClient
+from terminal.data.mexc_futures import MexcFuturesClient
 from terminal.db.store import Store
 from terminal.karakter.runner import run_lab
 
@@ -35,7 +35,7 @@ class _LabWorker(QThread):
         self.bars = bars
 
     def run(self) -> None:
-        client = MexcClient()
+        client = MexcFuturesClient()   # canlı sistemle aynı veri kaynağı (futures)
         store = Store()
         try:
             run_id = run_lab(

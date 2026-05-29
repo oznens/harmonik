@@ -17,7 +17,7 @@ import time
 from typing import Any, Callable
 
 from terminal.data.mexc_client import MexcClient, MexcError
-from terminal.data.mexc_futures import MexcFuturesError
+from terminal.data.mexc_futures import MexcFuturesClient, MexcFuturesError
 from terminal.db.store import Store
 from terminal.detection.models import Setup
 from terminal.detection.scanner import (
@@ -60,14 +60,23 @@ def run_lab(
     intervals: list[str],
     bars_per_pair: int,
     store: Store,
-    client: MexcClient,
+    client: "MexcClient | MexcFuturesClient",
     zigzag_threshold: float | None = None,
     progress: ProgressCb | None = None,
+    target_mode: str = "rr1",
+    include_abcd: bool = False,
+    entry_mode: str = "limit",
 ) -> int:
     """Karakter lab'i tek seferde çalıştır. run_id döner.
 
-    HTF entegrasyonu yok — backtest sırasında HTF anlık trend bilinemediği
-    için Q skoru HTF bileşeni dışlanır. Lab tamamen LTF outcomes'a odaklanır.
+    Varsayılanlar CANLI sistemle (harmonik.service) aynı seçilir, böylece
+    Karakter Skoru canlı performansı yansıtır:
+        target_mode="rr1" (tek 1:1 hedef), include_abcd=False (--no-abcd:
+        yalnız gerçek harmonikler), entry_mode="limit" (PRZ-zone dolum).
+    Veri kaynağı çağıran tarafça verilir (canlı = MexcFuturesClient).
+    Karşılaştırma için scan/giriş modları override edilebilir.
+
+    HTF: D pivot anı için tarihsel yeniden hesaplanır (look-ahead engellenir).
     """
     started = int(time.time() * 1000)
     run_id = store.create_karakter_run(started, bars_per_pair, symbols, intervals)
@@ -115,7 +124,8 @@ def run_lab(
 
             threshold = zigzag_threshold if zigzag_threshold is not None else default_threshold(interval)
             setups = scan_klines(klines, symbol, interval, zigzag_threshold=threshold,
-                                 htf_klines=htf_klines)
+                                 htf_klines=htf_klines, target_mode=target_mode,
+                                 include_abcd=include_abcd)
 
             if progress:
                 htf_note = f", HTF={htf_int}" if htf_klines else ", HTF=yok"
@@ -168,29 +178,19 @@ def run_lab(
                         s.htf_aligned = None
                         s.elenen = False
 
-                outcome = simulate_outcome(s, future)
-                store.add_karakter_sample(run_id, s, outcome)
+                # Karakter örneklemi: CANLI giriş moduyla (varsayılan limit/PRZ)
+                # → skor tablosu canlı dolum mantığını yansıtır.
+                sample_outcome = simulate_outcome(s, future, entry_mode=entry_mode)
+                store.add_karakter_sample(run_id, s, sample_outcome)
                 total_samples += 1
 
-                # Portföy simülasyonu için trade kaydı (elenen hariç — canlıda
-                # elenen setup lifecycle'a/paper'a girmez).
+                # Portföy karşılaştırma varyantları (elenen hariç — canlıda elenen
+                # setup lifecycle'a/paper'a girmez). Üç giriş kuralını da kıyas
+                # için ayrı simüle et (log'da ANINDA/LİMİT/ONAYLI özetleri).
                 sym = time_symmetry(s)
-                if not s.elenen and outcome.entered_price is not None:
-                    portfolio_trades.append({
-                        "symbol": s.symbol, "interval": s.interval,
-                        "pattern": s.pattern_name, "direction": s.direction,
-                        "ideal_entry": s.entry, "stop": s.stop, "tp1": s.tp1,
-                        "fill": outcome.entered_price,
-                        "open_time": outcome.entered_time,
-                        "close_time": outcome.exited_time,
-                        "outcome": outcome.outcome,
-                        "confluence": s.confluence_score or 0,
-                        "symmetry": sym,
-                    })
-
-                # Karşılaştırma varyantları (aynı setup, farklı giriş kuralı).
                 if not s.elenen:
-                    for mode, bucket in (("limit", portfolio_trades_limit),
+                    for mode, bucket in (("immediate", portfolio_trades),
+                                         ("limit", portfolio_trades_limit),
                                          ("confirm", portfolio_trades_confirm)):
                         ov = simulate_outcome(s, future, entry_mode=mode)
                         if ov.entered_price is not None and ov.exited_time is not None:
