@@ -276,9 +276,17 @@ class LifecycleTracker:
         #   Bear setup: bar.high >= setup.entry
         # Bu, "PRZ tam test edildi + tanımlayıcı limit dokunuldu" anlamına gelir.
         if setup.direction == "bull":
+            tp_first = h >= setup.tp1
             triggered = l <= setup.entry
         else:
+            tp_first = l <= setup.tp1
             triggered = h >= setup.entry
+        # Limit dolmadan TP1 vurulduysa → hareket bizsiz oldu (tükendi). Geri
+        # çekilmede girmek riskli → setup'ı İPTAL et (giriş yok).
+        if tp_first:
+            return self._transition(setup, setup_id, ADAY, EO, None, t,
+                                    notes="TP1 entry'den önce vuruldu — iptal (tükenmiş hareket)",
+                                    exit_reason="tp_before_entry")
         if triggered:
             return self._transition(setup, setup_id, ADAY, AKTIF, setup.entry, t,
                                     notes=f"entry tetiklendi (bar high={h:.6g} low={l:.6g})",

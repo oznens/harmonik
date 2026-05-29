@@ -84,3 +84,17 @@ def test_limit_stop_same_bar_is_stop():
     o = simulate_outcome(s, future, entry_mode="limit")
     assert o.outcome == "STOP"
     assert o.entered_price == e
+
+
+def test_limit_eo_when_tp_before_entry():
+    """Fiyat entry'ye DEĞMEDEN TP1'e giderse → setup iptal (tükenmiş hareket, EO).
+    Grafikteki gibi: harmonik çalıştı, biz girmedik; geri çekilmede girmemeli."""
+    s = _setup()
+    e, tp = s.entry, s.tp1
+    future = [
+        _bar(e + 0.5, e + 0.6, e + 0.3, e + 0.5, 1),     # entry üstünde, TP yok
+        _bar(e + 0.6, tp + 0.5, e + 0.5, tp, 2),         # high>=tp1, low hep entry üstü → TP-first
+    ]
+    o = simulate_outcome(s, future, entry_mode="limit")
+    assert o.outcome == "EO"
+    assert o.entered_price is None                        # işlem AÇILMADI (geç girilmedi)
