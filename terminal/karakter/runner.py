@@ -163,6 +163,7 @@ def run_lab(
                         "open_time": outcome.entered_time,
                         "close_time": outcome.exited_time,
                         "outcome": outcome.outcome,
+                        "confluence": s.confluence_score or 0,
                     })
 
             if progress:
@@ -175,10 +176,13 @@ def run_lab(
     if progress:
         try:
             from terminal.karakter.portfolio import (
-                format_portfolio_summary, simulate_portfolio,
+                format_confluence_sweep, format_portfolio_summary,
+                simulate_portfolio,
             )
             result = simulate_portfolio(portfolio_trades)
             progress(format_portfolio_summary(result))
+            # Confluence eşiği taraması — canlı --paper-min-confluence doğrulaması
+            progress(format_confluence_sweep(portfolio_trades))
         except Exception as e:  # özet başarısız olsa da lab sonucu kaybolmasın
             log.warning("portföy simülasyonu hatası: %s", e)
         progress(f"Lab tamamlandı: {total_samples} örneklem, run_id={run_id}")

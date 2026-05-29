@@ -41,6 +41,7 @@ def simulate_portfolio(
     initial_equity: float = 1000.0,
     risk_per_trade: float = 20.0,
     max_leverage: int = 20,
+    min_confluence: int = 0,
 ) -> PortfolioResult:
     """Setup işlemlerini kronolojik portföy olarak simüle et.
 
@@ -50,13 +51,17 @@ def simulate_portfolio(
             ideal_entry, stop, tp1,        # pozisyon boyutu ideal'den
             fill,                          # gerçek dolum (sonraki bar açılışı)
             open_time, close_time,         # ms
-            outcome                        # 'TP'/'STOP'/'ZI'
+            outcome,                       # 'TP'/'STOP'/'ZI'
+            confluence                     # confluence skoru (filtre için)
+        min_confluence: yalnızca confluence >= bu eşik işlemler alınır
+            (0 = filtre yok). Canlı --paper-min-confluence ile aynı mantık.
     """
     # Sadece gerçekten pozisyon açan & kapanan işlemler (EO girilmez, Aktif kapanmadı)
     cand = [
         t for t in trades
         if t.get("open_time") is not None and t.get("close_time") is not None
         and t.get("fill") and t["outcome"] in ("TP", "STOP", "ZI")
+        and t.get("confluence", 0) >= min_confluence
     ]
     cand.sort(key=lambda t: t["open_time"])
 
@@ -160,4 +165,34 @@ def format_portfolio_summary(r: PortfolioResult) -> str:
             f"{c['symbol']} {c['interval']} {c['pnl']:+.0f}$" for c in best))
         lines.append("En kötü: " + ", ".join(
             f"{c['symbol']} {c['interval']} {c['pnl']:+.0f}$" for c in worst))
+    return "\n".join(lines)
+
+
+def format_confluence_sweep(
+    trades: list[dict[str, Any]],
+    thresholds: tuple[int, ...] = (0, 30, 40, 50, 60, 70),
+    **sim_kwargs: Any,
+) -> str:
+    """Aynı backtest setlerini farklı confluence eşikleriyle simüle edip karşılaştır.
+
+    Tek çalıştırmada hangi confluence eşiğinin en iyi P&L verdiğini gösterir —
+    canlı `--paper-min-confluence` için veri-temelli doğrulama.
+    """
+    lines = [
+        "",
+        "═══ CONFLUENCE EŞİĞİ TARAMASI (portföy, canlı kurallar) ═══",
+        f"{'eşik':>6s} {'işlem':>6s} {'WR':>7s} {'P&L':>11s} {'P&L%':>8s} {'maxDD':>7s}",
+    ]
+    best = None
+    for th in thresholds:
+        r = simulate_portfolio(trades, min_confluence=th, **sim_kwargs)
+        if r.n_trades == 0:
+            lines.append(f">={th:<4d}   (işlem yok)")
+            continue
+        lines.append(f">={th:<4d} {r.n_trades:6d} {r.win_rate:6.1f}% "
+                     f"{r.total_pnl:+10.2f} {r.pnl_pct:+7.1f}% {r.max_drawdown_pct:6.1f}%")
+        if best is None or r.total_pnl > best[1]:
+            best = (th, r.total_pnl)
+    if best:
+        lines.append(f"→ En yüksek P&L: confluence >= {best[0]}")
     return "\n".join(lines)
