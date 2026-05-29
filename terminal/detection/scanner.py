@@ -220,6 +220,21 @@ def _normalize_sl(setup: Setup) -> None:
         setup.stop = setup.entry * (1 + MIN_SL_PCT)
 
 
+def time_symmetry(setup: Setup) -> float:
+    """AB ve CD bacaklarının ZAMAN (bar süresi) simetrisi → [0,1].
+
+    1.0 = bacaklar eşit süreli (temiz AB=CD). Düşük = bir bacak çok hızlı
+    (sert trend-dump, harmonik görünümlü ama değil). Filtre: bu eşiğin altı
+    elenir → fakeout azalır.
+    """
+    p = setup.pivots
+    t_ab = abs(p["B"].time - p["A"].time)
+    t_cd = abs(p["D"].time - p["C"].time)
+    if t_ab <= 0 or t_cd <= 0:
+        return 0.0
+    return min(t_ab, t_cd) / max(t_ab, t_cd)
+
+
 def _has_valid_rr(setup: Setup, min_rr: float = 1.0) -> bool:
     """R:R ≥ min_rr mu? TP-mesafesi SL-mesafesinden az olan setuplar reject edilir.
 

@@ -20,12 +20,12 @@ def store(tmp_path: Path) -> Store:
     s.close()
 
 
-def _worker(store: Store, pe: PaperEngine, mode: str) -> PairWorker:
+def _worker(store: Store, pe: PaperEngine, mode: str, min_sym: float = 0.0) -> PairWorker:
     w = PairWorker(
         symbol="TESTUSDT", interval="60m", tg=None, min_q=0, min_karakter=0.0,
         min_confluence=0, include_elenen=False, no_chart=True, no_potential=True,
         use_htf=False, zigzag_threshold=0.01, paper_engine=pe,
-        paper_entry_mode=mode,
+        paper_entry_mode=mode, min_time_symmetry=min_sym,
     )
     w.store = store
     w.poller = None
@@ -67,3 +67,19 @@ def test_market_mode_defers_to_next_bar(store: Store):
 
     assert sid in w._pending_entries               # market → sonraki bar dolumu (pending)
     assert pe.open_positions() == []               # henüz açılmadı
+
+
+def test_min_time_symmetry_gate_blocks(store: Store):
+    s, sid = _setup(store)
+    pe = PaperEngine(store)
+    w = _worker(store, pe, mode="market", min_sym=1.01)  # imkânsız eşik → her zaman blok
+    w._on_transition(_aktif(s, sid))
+    assert sid not in w._pending_entries           # simetri filtresi engelledi
+
+
+def test_min_time_symmetry_off_allows(store: Store):
+    s, sid = _setup(store)
+    pe = PaperEngine(store)
+    w = _worker(store, pe, mode="market", min_sym=0.0)  # filtre kapalı
+    w._on_transition(_aktif(s, sid))
+    assert sid in w._pending_entries

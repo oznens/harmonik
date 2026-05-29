@@ -27,7 +27,7 @@ from terminal.data.mexc_client import MexcClient, MexcError
 from terminal.data.mexc_futures import MexcFuturesClient, MexcFuturesError
 from terminal.paper.engine import PaperEngine
 from terminal.db.store import Store
-from terminal.detection.scanner import default_threshold, scan_klines
+from terminal.detection.scanner import default_threshold, scan_klines, time_symmetry
 from terminal.lifecycle.states import ADAY, AKTIF, EO, STOP, TP, ZI
 from terminal.lifecycle.tracker import LifecycleTracker, Transition
 from terminal.quality.htf_ltf import htf_for
@@ -74,6 +74,7 @@ class PairWorker:
         poll_seconds: int = POLL_INTERVAL_SECONDS,
         paper_min_confluence: int = 0,
         paper_entry_mode: str = "market",
+        min_time_symmetry: float = 0.0,
     ) -> None:
         self.symbol = symbol
         self.interval = interval
@@ -97,6 +98,8 @@ class PairWorker:
         # "market": agresif giriş, sonraki bar açılışından dolum (slippage'lı).
         # "limit":  pasif giriş, fiyat entry'ye değince TAM entry'den dolum (limit emir).
         self.paper_entry_mode = paper_entry_mode
+        # Yapısal filtre #2: AB/CD zaman simetrisi < eşik → paper'a açma (0=kapalı).
+        self.min_time_symmetry = min_time_symmetry
 
         # Thread-local kaynaklar (run() içinde yaratılır)
         self.client: MexcClient | None = None
@@ -153,6 +156,13 @@ class PairWorker:
                              self._tag, t.setup.pattern_name,
                              t.setup.confluence_score or 0, self.paper_min_confluence)
                     return
+                # Yapısal filtre #2: zaman simetrisi (AB/CD süre oranı)
+                if self.min_time_symmetry > 0:
+                    sym = time_symmetry(t.setup)
+                    if sym < self.min_time_symmetry:
+                        log.info("%s [AKTIF] %s simetri=%.2f < %.2f → paper'a açma",
+                                 self._tag, t.setup.pattern_name, sym, self.min_time_symmetry)
+                        return
                 if self.paper_entry_mode == "limit":
                     # LİMİT: fiyat entry'ye değdi (pasif AKTIF) → TAM entry
                     # fiyatından aç (slippage yok). Sonraki-bar pending YOK.
@@ -554,6 +564,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--paper-entry-mode", choices=["market", "limit"], default="market",
                         help="market: agresif, sonraki bar açılışından dolum (slippage'lı). "
                              "limit: pasif, fiyat entry'ye değince TAM entry'den dolum.")
+    parser.add_argument("--min-time-symmetry", type=float, default=0.0,
+                        help="Yapısal filtre: AB/CD zaman simetrisi < eşik → paper'a açma "
+                             "(0=kapalı, 1=tam simetrik). Backtest sweep'ine göre ayarla.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -635,6 +648,7 @@ def main(argv: list[str] | None = None) -> int:
             poll_seconds=args.poll_seconds,
             paper_min_confluence=args.paper_min_confluence,
             paper_entry_mode=args.paper_entry_mode,
+            min_time_symmetry=args.min_time_symmetry,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)

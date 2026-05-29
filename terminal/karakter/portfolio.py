@@ -196,3 +196,34 @@ def format_confluence_sweep(
     if best:
         lines.append(f"→ En yüksek P&L: confluence >= {best[0]}")
     return "\n".join(lines)
+
+
+def format_symmetry_sweep(
+    trades: list[dict[str, Any]],
+    thresholds: tuple[float, ...] = (0.0, 0.3, 0.5, 0.7, 0.9),
+    **sim_kwargs: Any,
+) -> str:
+    """Zaman-simetrisi eşiğini tara (trade'leri 'symmetry' alanına göre süzerek).
+
+    Yapısal filtrenin (AB/CD süre simetrisi) WR/P&L'i gerçekten iyileştirip
+    iyileştirmediğini tek backtest'te gösterir.
+    """
+    lines = [
+        "",
+        "═══ ZAMAN SİMETRİSİ EŞİĞİ TARAMASI (portföy) ═══",
+        f"{'eşik':>6s} {'işlem':>6s} {'WR':>7s} {'P&L':>11s} {'P&L%':>8s} {'maxDD':>7s}",
+    ]
+    best = None
+    for th in thresholds:
+        subset = [t for t in trades if t.get("symmetry", 0.0) >= th]
+        if not subset:
+            lines.append(f">={th:<4.2f}   (işlem yok)")
+            continue
+        r = simulate_portfolio(subset, **sim_kwargs)
+        lines.append(f">={th:<4.2f} {r.n_trades:6d} {r.win_rate:6.1f}% "
+                     f"{r.total_pnl:+10.2f} {r.pnl_pct:+7.1f}% {r.max_drawdown_pct:6.1f}%")
+        if best is None or r.total_pnl > best[1]:
+            best = (th, r.total_pnl)
+    if best:
+        lines.append(f"→ En yüksek P&L: simetri >= {best[0]:.2f}")
+    return "\n".join(lines)

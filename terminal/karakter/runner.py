@@ -20,7 +20,9 @@ from terminal.data.mexc_client import MexcClient, MexcError
 from terminal.data.mexc_futures import MexcFuturesError
 from terminal.db.store import Store
 from terminal.detection.models import Setup
-from terminal.detection.scanner import _is_elenen, default_threshold, scan_klines
+from terminal.detection.scanner import (
+    _is_elenen, default_threshold, scan_klines, time_symmetry,
+)
 from terminal.karakter.simulator import SimOutcome, simulate_outcome
 from terminal.quality.htf_ltf import alignment, detect_trend, htf_for
 
@@ -172,6 +174,7 @@ def run_lab(
 
                 # Portföy simülasyonu için trade kaydı (elenen hariç — canlıda
                 # elenen setup lifecycle'a/paper'a girmez).
+                sym = time_symmetry(s)
                 if not s.elenen and outcome.entered_price is not None:
                     portfolio_trades.append({
                         "symbol": s.symbol, "interval": s.interval,
@@ -182,6 +185,7 @@ def run_lab(
                         "close_time": outcome.exited_time,
                         "outcome": outcome.outcome,
                         "confluence": s.confluence_score or 0,
+                        "symmetry": sym,
                     })
 
                 # Karşılaştırma varyantları (aynı setup, farklı giriş kuralı).
@@ -199,6 +203,7 @@ def run_lab(
                                 "close_time": ov.exited_time,
                                 "outcome": ov.outcome,
                                 "confluence": s.confluence_score or 0,
+                                "symmetry": sym,
                             })
 
             if progress:
@@ -212,7 +217,7 @@ def run_lab(
         try:
             from terminal.karakter.portfolio import (
                 format_confluence_sweep, format_portfolio_summary,
-                simulate_portfolio,
+                format_symmetry_sweep, simulate_portfolio,
             )
             progress("ANINDA GİRİŞ (market, sonraki bar açılışı):")
             progress(format_portfolio_summary(simulate_portfolio(portfolio_trades)))
@@ -220,7 +225,9 @@ def run_lab(
             progress(format_portfolio_summary(simulate_portfolio(portfolio_trades_limit)))
             progress("ONAYLI GİRİŞ (BOS — D'den sonra yapı kırılımı bekle):")
             progress(format_portfolio_summary(simulate_portfolio(portfolio_trades_confirm)))
-            # Confluence eşiği taraması (LİMİT giriş seti üzerinde — yeni varsayılan)
+            # LİMİT seti üzerinde filtre taramaları — yapısal filtre WR'yi
+            # gerçekten yükseltiyor mu (zaman simetrisi) + confluence kıyas.
+            progress(format_symmetry_sweep(portfolio_trades_limit))
             progress(format_confluence_sweep(portfolio_trades_limit))
         except Exception as e:  # özet başarısız olsa da lab sonucu kaybolmasın
             log.warning("portföy simülasyonu hatası: %s", e)
