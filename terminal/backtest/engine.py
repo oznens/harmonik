@@ -67,17 +67,22 @@ def run_backtest(
     klines: list[dict[str, Any]],
     symbol: str,
     interval: str,
-    entry_mode: str = "market",
+    entry_mode: str = "limit",
     zigzag: float | None = None,
     min_rr: float = 1.0,
-    target_mode: str = "structural",
-    include_abcd: bool = True,
+    target_mode: str = "rr1",
+    include_abcd: bool = False,
 ) -> BacktestResult:
     """Mum dizisi üzerinde backtest çalıştır → grafik + istatistik verisi.
 
-    target_mode: "structural" (TP1=B/TP2=A yapısal) veya "rr1" (terminalMiraz
-        referans: tek sabit 1:1 R:R hedef). Grafikte iki modeli karşılaştırmak için.
-    include_abcd: False ise standalone AB=CD'yi tarama (sadece harmonikler).
+    Varsayılanlar CANLI sistemle (harmonik.service) aynı seçilir, böylece
+    backtest sonuçları paper/journal ile birebir kıyaslanabilir:
+        entry_mode="limit" (PRZ-zone dolum), target_mode="rr1" (tek 1:1 hedef),
+        include_abcd=False (--no-abcd: yalnız gerçek harmonikler).
+    Diğer modlar (market/structural/+AB=CD) karşılaştırma için override edilebilir.
+
+    target_mode: "rr1" (canlı: tek sabit 1:1 R:R hedef) veya "structural"
+        (TP1=B/TP2=A yapısal). include_abcd: True ise standalone AB=CD de taranır.
     """
     if not klines:
         return BacktestResult(symbol, interval, entry_mode, [], [], [], {})
