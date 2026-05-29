@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from terminal.config import DB_PATH
+from terminal.web import cards
 
 log = logging.getLogger(__name__)
 
@@ -260,6 +261,7 @@ def render_dashboard(db_path, refresh: int) -> str:
     total_trades = tp = stop = 0
     open_raw: list = []
     closed_raw: list = []
+    card_trades: list = []
 
     try:
         conn = _connect_ro(db_path)
@@ -279,6 +281,7 @@ def render_dashboard(db_path, refresh: int) -> str:
                 "FROM paper_trades WHERE closed_at IS NOT NULL "
                 "ORDER BY closed_at DESC LIMIT 50"
             ).fetchall()
+            card_trades = cards.load_card_trades(conn, limit=24)
             if acc:
                 initial = acc["initial_equity"]
                 equity = acc["current_equity"]
@@ -299,7 +302,7 @@ def render_dashboard(db_path, refresh: int) -> str:
     wr_cls = "g" if decided and wr >= 60 else "r" if decided and wr < 45 else "d"
     now = datetime.now(tz=TZ).strftime("%H:%M:%S")
 
-    cards = f"""
+    stat_cards = f"""
     <div class="cards">
       <div class="card"><div class="lbl">Equity</div>
         <div class="val {'g' if equity >= initial else 'r'}">${equity:.2f}</div></div>
@@ -318,6 +321,7 @@ def render_dashboard(db_path, refresh: int) -> str:
 
     open_table = _open_table(open_raw)
     closed_table = _closed_table(closed_raw)
+    cards_grid = cards.cards_grid_html(card_trades, "Henüz işlem yok.")
 
     return f"""<!doctype html>
 <html lang="tr"><head>
@@ -325,10 +329,12 @@ def render_dashboard(db_path, refresh: int) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="{refresh}">
 <title>Harmonik · Paper</title>
-<style>{STYLE}</style></head>
+<style>{STYLE}{cards.CARD_CSS}</style></head>
 <body><div class="wrap">
   <h1>💼 Harmonik — Paper Trade</h1>
-  {cards}
+  {stat_cards}
+  <div class="sec">📇 Sonuç Kartları ({len(card_trades)})</div>
+  {cards_grid}
   <div class="sec">🟢 Açık Pozisyonlar ({len(open_raw)})</div>
   <div class="tablewrap">{open_table}</div>
   <div class="sec dim">📋 Son Kapanan Trade'ler ({len(closed_raw)})</div>

@@ -11,6 +11,7 @@ from terminal.db.store import Store
 from terminal.ui.data_provider import DataProvider
 from terminal.ui.status_bar import StatusBar
 from terminal.ui.widgets.backtest_tab import BacktestTab
+from terminal.ui.widgets.cards_tab import CardsTab
 from terminal.ui.widgets.journal_tab import JournalTab
 from terminal.ui.widgets.karakter_tab import KarakterTab
 from terminal.ui.widgets.live_chart_tab import LiveChartTab
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
         self.live_chart_tab = LiveChartTab(store)
         self.potential_tab = PotentialTab(store)
         self.trades_tab = TradesTab(store)
+        self.cards_tab = CardsTab(store)
         self.results_tab = ResultsTab(self.provider)
         self.karakter_tab = KarakterTab(self.provider)
         self.journal_tab = JournalTab(store)
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.backtest_tab, "🔬 Backtest")
         tabs.addTab(self.potential_tab, "🔮 Potansiyel")
         tabs.addTab(self.trades_tab, "💼 Tradeler")
+        tabs.addTab(self.cards_tab, "📇 Kartlar")
         tabs.addTab(self.results_tab, "Sonuçlar")
         tabs.addTab(self.journal_tab, "📊 Journal")
         tabs.addTab(self.karakter_tab, "Parite Karakter")
@@ -96,6 +99,7 @@ class MainWindow(QMainWindow):
             self.live_chart_tab.refresh()
             self.potential_tab.refresh()
             self.trades_tab.refresh()
+            self.cards_tab.refresh()
             self.results_tab.refresh()
             self.karakter_tab.refresh()
             self.journal_tab.refresh()
@@ -126,6 +130,7 @@ class MainWindow(QMainWindow):
         self.karakter_tab.provider = self.provider
         self.potential_tab.store = self.store
         self.trades_tab.store = self.store
+        self.cards_tab.store = self.store
         self.journal_tab.store = self.store
         self.live_chart_tab.set_store(self.store)
         self._last_db_mtime = mtime
