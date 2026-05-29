@@ -133,12 +133,19 @@ class KarakterTab(QWidget):
 
     def _refresh_runs(self) -> None:
         runs = self.provider.list_runs()
+        # Mevcut seçili koşumu koru: 5 sn'lik periyodik refresh_all bu listeyi
+        # yeniden kuruyordu; eskiden seçim her seferinde "Tüm koşumlar"a (index 0)
+        # düşüyor, kullanıcı bir koşum seçince 1-2 sn sonra geri alınıyordu.
+        prev = self.run_selector.currentData()
         self.run_selector.blockSignals(True)
         self.run_selector.clear()
         self.run_selector.addItem("Tüm koşumlar (toplam)", userData=None)
         for r in runs:
             label = f"#{r.run_id} · {format_local_short(r.started_at)} · {r.sample_count} örneklem"
             self.run_selector.addItem(label, userData=r.run_id)
+        # Önceki seçimi geri yükle (koşum hâlâ listede ise); yoksa "Tüm koşumlar".
+        idx = 0 if prev is None else self.run_selector.findData(prev)
+        self.run_selector.setCurrentIndex(idx if idx >= 0 else 0)
         self.run_selector.blockSignals(False)
         self._update_cards()
 
