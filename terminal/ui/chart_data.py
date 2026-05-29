@@ -210,22 +210,23 @@ def _harmonic_layer(
     if setup is None:
         return {"present": False}
 
-    line = []
-    markers = []
+    # AB=CD ailesinde X slotu A'nın kopyasıdır (X==A, aynı bar). lightweight-charts
+    # setData yinelenen/sırasız zamanı reddedip TÜM çizimi patlatır → pivotları
+    # zaman bazında tekille (son harf kazanır → AB=CD'de "A" gösterilir).
+    by_time: dict[int, dict[str, Any]] = {}
     for letter in "XABCD":
         p = setup.pivots.get(letter)
         if p is None:
             continue
         t = _sec(p.time)
-        line.append({"time": t, "value": p.price})
-        above = p.kind == "high"
-        markers.append({
-            "time": t,
-            "position": "aboveBar" if above else "belowBar",
-            "color": GOLD, "shape": "circle", "text": letter,
-        })
-    line.sort(key=lambda d: d["time"])
-    markers.sort(key=lambda m: m["time"])
+        by_time[t] = {"time": t, "value": p.price,
+                      "above": p.kind == "high", "label": letter}
+    ordered = sorted(by_time.values(), key=lambda d: d["time"])
+    line = [{"time": d["time"], "value": d["value"]} for d in ordered]
+    markers = [{"time": d["time"],
+                "position": "aboveBar" if d["above"] else "belowBar",
+                "color": GOLD, "shape": "circle", "text": d["label"]}
+               for d in ordered]
 
     levels = [
         {"price": setup.entry, "color": BLUE, "title": "Entry", "style": "solid"},

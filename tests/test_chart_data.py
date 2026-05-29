@@ -79,6 +79,39 @@ def test_build_payload_well_formed(store: Store):
     assert any(opt["id"] == sid for opt in payload["setups"])
 
 
+def test_harmonic_layer_abcd_x_equals_a_deduped(store: Store):
+    """AB=CD ailesinde X==A (aynı bar): harmonic çizgi zaman bazında tekillenmeli.
+    Yoksa lightweight-charts setData yinelenen zamanı reddedip canlı grafiği
+    sessizce patlatır (AB=CD canlıda aktif edilince ortaya çıkar)."""
+    from terminal.detection.models import Pivot, Setup
+
+    step, base = 3_600_000, 1_700_000_000_000
+    klines = [{"open_time": base + i * step, "close_time": base + i * step + step - 1,
+               "open": 100.0 + i, "high": 100.5 + i, "low": 99.5 + i, "close": 100.0 + i,
+               "volume": 100.0, "quote_volume": 1e4} for i in range(40)]
+    store.upsert_klines(SYMBOL, INTERVAL, klines)
+
+    a = Pivot(index=2, time=klines[2]["open_time"], price=101.0, kind="low")
+    setup = Setup(
+        symbol=SYMBOL, interval=INTERVAL, pattern_name="1.27 AB=CD", direction="bull",
+        pivots={"X": a, "A": a,   # AB=CD: X yuvası A'nın kopyası → aynı zaman
+                "B": Pivot(5, klines[5]["open_time"], 104.0, "high"),
+                "C": Pivot(8, klines[8]["open_time"], 102.0, "low"),
+                "D": Pivot(12, klines[12]["open_time"], 100.0, "high")},
+        b_ratio=0.0, c_ratio=0.5, d_ratio=0.786, bc_proj=1.27, cd_ab_ratio=1.0,
+        ab_cd_equivalent=True, prz_low=99.5, prz_high=100.5,
+        prz_components=[("x", 100.0)], entry=100.0, stop=98.0, tp1=104.0, tp2=106.0,
+        detected_at=klines[12]["open_time"], pattern_family="abcd")
+    sid = store.upsert_setup(setup)
+
+    h = chart_data._harmonic_layer(store, SYMBOL, INTERVAL, setup_id=sid)
+    assert h["present"] is True
+    times = [p["time"] for p in h["line"]]
+    assert times == sorted(set(times)), f"yinelenen/sırasız pivot zamanı: {times}"
+    assert len(h["line"]) == 4   # X ve A tek noktaya indi → A,B,C,D
+    json.dumps(h)                # JSON-serileştirilebilir kalmalı
+
+
 def test_list_open_setups_excludes_closed(store: Store):
     # Açık (Aktif) setup
     s_open, sid_open, _ = _seed(store, gartley_bull, base_time=1_700_000_000_000)

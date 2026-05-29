@@ -20,7 +20,6 @@ ExecStart=/home/harmonik/harmonik/venv/bin/python -m terminal.cli.run_live_multi
     --paper-min-confluence 0 \
     --paper-entry-mode limit \
     --target-mode rr1 \
-    --no-abcd \
     --log-level INFO
 Restart=on-failure
 RestartSec=10
