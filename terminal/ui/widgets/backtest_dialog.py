@@ -10,7 +10,7 @@ import threading
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QProgressBar, QPushButton, QSpinBox, QTextEdit, QVBoxLayout,
 )
 
@@ -28,11 +28,14 @@ class _LabWorker(QThread):
     finished_ok = Signal(int)   # run_id
     failed = Signal(str)
 
-    def __init__(self, symbols: list[str], intervals: list[str], bars: int) -> None:
+    def __init__(self, symbols: list[str], intervals: list[str], bars: int,
+                 entry_mode: str = "limit", include_abcd: bool = False) -> None:
         super().__init__()
         self.symbols = symbols
         self.intervals = intervals
         self.bars = bars
+        self.entry_mode = entry_mode
+        self.include_abcd = include_abcd
 
     def run(self) -> None:
         client = MexcFuturesClient()   # canlı sistemle aynı veri kaynağı (futures)
@@ -41,6 +44,7 @@ class _LabWorker(QThread):
             run_id = run_lab(
                 self.symbols, self.intervals, self.bars, store, client,
                 progress=lambda msg: self.progress.emit(msg),
+                entry_mode=self.entry_mode, include_abcd=self.include_abcd,
             )
             self.finished_ok.emit(run_id)
         except Exception as e:
@@ -77,6 +81,17 @@ class BacktestDialog(QDialog):
         self.bars_input.setValue(5000)
         self.bars_input.setSuffix("  mum")
 
+        # Giriş modu — varsayılan limit (canlı sistemle aynı)
+        self.mode_input = QComboBox()
+        self.mode_input.addItem("limit (PRZ zone) — canlı", "limit")
+        self.mode_input.addItem("market (D'den, agresif)", "market")
+        self.mode_input.addItem("onaylı (BOS)", "confirm")
+
+        # Pattern seti — varsayılan AB=CD yok (canlı --no-abcd)
+        self.abcd_input = QComboBox()
+        self.abcd_input.addItem("AB=CD yok — canlı (sadece harmonik)", False)
+        self.abcd_input.addItem("AB=CD dahil (tüm patternler)", True)
+
         form = QVBoxLayout()
         form.addWidget(QLabel("Pariteler (virgülle ayır):"))
         form.addWidget(self.symbols_input)
@@ -87,6 +102,14 @@ class BacktestDialog(QDialog):
         row.addWidget(self.bars_input)
         row.addStretch()
         form.addLayout(row)
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Giriş modu:"))
+        row2.addWidget(self.mode_input)
+        row2.addSpacing(16)
+        row2.addWidget(QLabel("Pattern seti:"))
+        row2.addWidget(self.abcd_input)
+        row2.addStretch()
+        form.addLayout(row2)
 
         # Butonlar
         self.start_btn = QPushButton("Backtest'i Başlat")
@@ -138,13 +161,23 @@ class BacktestDialog(QDialog):
             norm.append(v)
         intervals = norm
 
+        entry_mode = self.mode_input.currentData()
+        include_abcd = bool(self.abcd_input.currentData())
+
         total = len(symbols) * len(intervals)
-        self.log.append(f"<b>Başlıyor: {len(symbols)} parite × {len(intervals)} TF × {bars} mum = {total} kombinasyon</b>\n")
+        abcd_lbl = "AB=CD dahil" if include_abcd else "sadece harmonik"
+        self.log.append(
+            f"<b>Başlıyor: {len(symbols)} parite × {len(intervals)} TF × {bars} mum "
+            f"= {total} kombinasyon</b>")
+        self.log.append(
+            f"<span style='color:#888'>giriş={entry_mode} · {abcd_lbl} · hedef=rr1 "
+            f"(1:1) · futures</span>\n")
 
         self.start_btn.setEnabled(False)
         self.progress.setVisible(True)
 
-        self._worker = _LabWorker(symbols, intervals, bars)
+        self._worker = _LabWorker(symbols, intervals, bars,
+                                  entry_mode=entry_mode, include_abcd=include_abcd)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished_ok.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
