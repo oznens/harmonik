@@ -52,3 +52,35 @@ def test_confirm_eo_when_no_bos():
     o = simulate_outcome(s, future, entry_mode="confirm")
     assert o.outcome == "EO"
     assert o.entered_price is None
+
+
+# ---- LİMİT giriş ----
+
+def test_limit_fills_at_entry_then_tp():
+    s = _setup()
+    e, tp = s.entry, s.tp1
+    future = [
+        _bar(e + 0.5, e + 0.6, e - 0.01, e + 0.1, 1),    # bar0: low<=entry → entry'den dol
+        _bar(e + 0.1, tp + 0.5, e + 0.05, tp, 2),        # bar1: high>=tp1 → TP
+    ]
+    o = simulate_outcome(s, future, entry_mode="limit")
+    assert o.outcome == "TP"
+    assert o.entered_price == e                           # TAM entry (limit) — slippage yok
+
+
+def test_limit_eo_when_never_touches_entry():
+    s = _setup()
+    e = s.entry
+    future = [_bar(e + 1, e + 2, e + 0.5, e + 1.5, t) for t in range(1, 5)]  # hep entry üstü
+    o = simulate_outcome(s, future, entry_mode="limit")
+    assert o.outcome == "EO"
+    assert o.entered_price is None                        # limit dolmadı
+
+
+def test_limit_stop_same_bar_is_stop():
+    s = _setup()
+    e, st = s.entry, s.stop
+    future = [_bar(e + 0.2, e + 0.3, st - 0.1, st, 1)]    # entry'ye + stop'a aynı bar
+    o = simulate_outcome(s, future, entry_mode="limit")
+    assert o.outcome == "STOP"
+    assert o.entered_price == e

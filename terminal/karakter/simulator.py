@@ -57,6 +57,8 @@ def simulate_outcome(
         entry_mode = "immediate" if force_immediate_entry else "passive"
     if entry_mode == "confirm":
         return _simulate_confirm(setup, future_klines, aday_timeout, aktif_timeout)
+    if entry_mode == "limit":
+        return _simulate_limit(setup, future_klines, aday_timeout, aktif_timeout)
 
     bull = setup.direction == "bull"
     entry_trigger = setup.entry
@@ -209,3 +211,61 @@ def _simulate_confirm(
 
     return SimOutcome(outcome="Aktif", entered_idx=entered_idx, entered_time=entered_time,
                       exited_idx=None, exited_time=None, entered_price=entered_price)
+
+
+def _simulate_limit(
+    setup: Setup,
+    future: list[dict[str, Any]],
+    fill_timeout: int,
+    aktif_timeout: int,
+) -> SimOutcome:
+    """LİMİT giriş: D/entry fiyatına limit emir konur, fiyat değince TAM entry'den dolar.
+
+    Klasik harmonik execution (Carney: PRZ'de limit). Slippage YOK — dolum = entry.
+    - Bull: fiyat entry'ye iner (low <= entry) → dol. Bear: high >= entry.
+    - fill_timeout içinde fiyat entry'ye değmezse → limit dolmaz (EO).
+    - Dolum barında stop da değdiyse → STOP (dolup hemen stop; tutucu).
+    - TP/STOP önce-STOP (canlı _check_aktif ile tutarlı).
+    """
+    bull = setup.direction == "bull"
+    entry = setup.entry
+    n = len(future)
+    entered_idx: int | None = None
+    entered_time: int | None = None
+
+    for i in range(n):
+        bar = future[i]
+        touched = (bull and bar["low"] <= entry) or (not bull and bar["high"] >= entry)
+        if touched:
+            entered_idx = i
+            entered_time = bar["open_time"]
+            break
+        if i >= fill_timeout:
+            return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                              exited_idx=i, exited_time=bar["open_time"],
+                              entered_price=None)
+    if entered_idx is None:
+        return SimOutcome(outcome="EO", entered_idx=None, entered_time=None,
+                          exited_idx=None, exited_time=None, entered_price=None)
+
+    # Dolum = TAM entry fiyatı (limit). AKTIF: önce STOP (canlı ile tutarlı).
+    for j in range(entered_idx, n):
+        bar = future[j]
+        hit_sl = (bull and bar["low"] <= setup.stop) or (not bull and bar["high"] >= setup.stop)
+        hit_tp = (bull and bar["high"] >= setup.tp1) or (not bull and bar["low"] <= setup.tp1)
+        if hit_sl:
+            return SimOutcome(outcome="STOP", entered_idx=entered_idx,
+                              entered_time=entered_time, exited_idx=j,
+                              exited_time=bar["open_time"], entered_price=entry,
+                              ambiguous=hit_tp)
+        if hit_tp:
+            return SimOutcome(outcome="TP", entered_idx=entered_idx,
+                              entered_time=entered_time, exited_idx=j,
+                              exited_time=bar["open_time"], entered_price=entry)
+        if j - entered_idx >= aktif_timeout:
+            return SimOutcome(outcome="ZI", entered_idx=entered_idx,
+                              entered_time=entered_time, exited_idx=j,
+                              exited_time=bar["open_time"], entered_price=entry)
+
+    return SimOutcome(outcome="Aktif", entered_idx=entered_idx, entered_time=entered_time,
+                      exited_idx=None, exited_time=None, entered_price=entry)
