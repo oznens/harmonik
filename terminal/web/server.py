@@ -255,12 +255,41 @@ def chart_page(db_path, setup_id: int) -> str:
 </div></body></html>"""
 
 
+def _pattern_table(rows: list) -> str:
+    """Harmonik bazında performans: TP / SL / WR / P&L + ortalama skorlar."""
+    if not rows:
+        return '<div class="empty">Henüz kapanan kararlı işlem yok.</div>'
+    head = ("<table><thead><tr>"
+            '<th class="l">Pattern</th><th>TP</th><th>SL</th><th>WR</th>'
+            "<th>P&amp;L</th><th>Ø Q</th><th>Ø Conf</th>"
+            "</tr></thead><tbody>")
+    body = []
+    for r in rows:
+        tp = r["tp"] or 0
+        sl = r["sl"] or 0
+        dec = tp + sl
+        wr = (tp / dec * 100) if dec else 0
+        pnl = r["pnl"] or 0
+        wr_cls = "g" if wr >= 50 else "r"
+        pnl_cls = "g" if pnl > 0 else "r" if pnl < 0 else "d"
+        body.append(
+            f'<tr><td class="l">{_e(r["pattern"])}</td>'
+            f'<td class="g">{tp}</td><td class="r">{sl}</td>'
+            f'<td class="{wr_cls}">{wr:.0f}%</td>'
+            f'<td class="{pnl_cls}">{"+" if pnl >= 0 else ""}${pnl:.2f}</td>'
+            f'<td>{(r["avg_q"] or 0):.0f}</td>'
+            f'<td>{(r["avg_conf"] or 0):.0f}</td></tr>'
+        )
+    return head + "".join(body) + "</tbody></table>"
+
+
 def render_dashboard(db_path, refresh: int) -> str:
     initial = equity = 1000.0
     total_pnl = pnl_pct = 0.0
     total_trades = tp = stop = 0
     open_raw: list = []
     closed_raw: list = []
+    pattern_raw: list = []
     card_trades: list = []
 
     try:
@@ -280,6 +309,16 @@ def render_dashboard(db_path, refresh: int) -> str:
                 "stop_price, tp1_price, exit_price, outcome, pnl_usd, leverage, closed_at "
                 "FROM paper_trades WHERE closed_at IS NOT NULL "
                 "ORDER BY closed_at DESC LIMIT 50"
+            ).fetchall()
+            pattern_raw = conn.execute(
+                "SELECT pt.pattern AS pattern, "
+                "SUM(CASE WHEN pt.outcome='TP' THEN 1 ELSE 0 END) AS tp, "
+                "SUM(CASE WHEN pt.outcome='STOP' THEN 1 ELSE 0 END) AS sl, "
+                "SUM(COALESCE(pt.pnl_usd, 0)) AS pnl, "
+                "AVG(s.q_score) AS avg_q, AVG(s.confluence_score) AS avg_conf "
+                "FROM paper_trades pt LEFT JOIN setups s ON s.id = pt.setup_id "
+                "WHERE pt.closed_at IS NOT NULL AND pt.outcome IN ('TP','STOP') "
+                "GROUP BY pt.pattern ORDER BY (tp + sl) DESC"
             ).fetchall()
             card_trades = cards.load_card_trades(conn, limit=24)
             if acc:
@@ -321,6 +360,7 @@ def render_dashboard(db_path, refresh: int) -> str:
 
     open_table = _open_table(open_raw)
     closed_table = _closed_table(closed_raw)
+    pattern_table = _pattern_table(pattern_raw)
     cards_grid = cards.cards_grid_html(card_trades, "Henüz işlem yok.")
 
     return f"""<!doctype html>
@@ -335,6 +375,8 @@ def render_dashboard(db_path, refresh: int) -> str:
   {stat_cards}
   <div class="sec">📇 Sonuç Kartları ({len(card_trades)})</div>
   {cards_grid}
+  <div class="sec">📊 Harmonik Performansı ({len(pattern_raw)})</div>
+  <div class="tablewrap">{pattern_table}</div>
   <div class="sec">🟢 Açık Pozisyonlar ({len(open_raw)})</div>
   <div class="tablewrap">{open_table}</div>
   <div class="sec dim">📋 Son Kapanan Trade'ler ({len(closed_raw)})</div>
