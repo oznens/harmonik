@@ -22,16 +22,26 @@ def test_round_sz_and_px():
     assert inst.round_px(74000.07) == 74000.1
 
 
-def test_sizing_basic_btc():
+def test_sizing_basic_btc_aggressive():
+    """Varsayılan (aggressive): max kaldıraç → margin minimum (az parayla çok poz)."""
     inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
     oi = _inst_with(inst)
     # entry 74000, stop 72000 (~%2.7 SL), $20 risk → notional ~740
     s = oi.size_for("BTCUSDT", 74000, 72000, 74000, risk_usd=20, equity=1000)
     assert s.ok
-    assert abs(s.notional_usd - 740.74) < 1.0   # 20 / (2000/74000)
-    assert s.leverage == 1                        # 740 < 1000 equity
-    # sz = 740 / (74000*0.01) = 1.0 kontrat
-    assert abs(s.sz - 1.0) < 0.01
+    assert abs(s.notional_usd - 740.74) < 1.0   # risk SABİT (20/(2000/74000))
+    assert s.leverage == 100                      # paritenin MAX'ı → margin min
+    assert abs(s.margin_usd - 7.4) < 0.1          # 740/100 = ~7.4 (az teminat)
+    assert abs(s.sz - 1.0) < 0.01                 # sz risk'e göre, kaldıraçtan bağımsız
+
+
+def test_sizing_conservative_mode():
+    """aggressive_leverage=False: eski davranış (margin yüksek, az poz)."""
+    inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
+    oi = _inst_with(inst)
+    s = oi.size_for("BTCUSDT", 74000, 72000, 74000, risk_usd=20, equity=1000,
+                    aggressive_leverage=False)
+    assert s.leverage == 1 and abs(s.margin_usd - 740.0) < 1.0
 
 
 def test_sizing_caps_at_max_lever():

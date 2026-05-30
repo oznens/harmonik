@@ -104,13 +104,20 @@ class OkxInstruments:
 
     def size_for(self, symbol: str, entry: float, stop: float, price: float,
                  risk_usd: float, equity: float,
-                 max_user_lever: int = 100) -> Sizing | None:
-        """$risk + dinamik kaldıraç → OKX kontrat adedi.
+                 max_user_lever: int = 100,
+                 aggressive_leverage: bool = True) -> Sizing | None:
+        """$risk + kaldıraç → OKX kontrat adedi.
 
         risk = $risk_usd (SL'e değerse kaybedilecek). SL mesafesi %p.
-        Notional = risk / p (paper ile aynı). Kaldıraç = ceil(notional/equity),
-        paritenin max_lever'ı ve max_user_lever ile sınırlı. sz = notional /
-        (price * ctVal), lot'a yuvarlı, min_sz kontrolü.
+        Notional = risk / p (paper ile aynı — risk SL mesafesiyle sabit).
+
+        Kaldıraç:
+          aggressive_leverage=True (varsayılan): paritenin MAX kaldıracını kullan
+            → margin = notional/maxLever MİNİMUM olur → az parayla çok pozisyon.
+            (Kullanıcı isteği: "20$ riske, max kaldıraç, çok poz".)
+            ÖNEMLİ: risk yine $20 SABİT (SL mesafesi belirler), kaldıraç sadece
+            kaç $ teminat KİLİTLENECEĞİNİ değiştirir — kayıp miktarını DEĞİL.
+          aggressive_leverage=False: ceil(notional/equity) — margin yüksek, az poz.
         """
         inst = self.get(symbol)
         if inst is None or inst.ct_val <= 0 or price <= 0 or entry <= 0:
@@ -119,9 +126,13 @@ class OkxInstruments:
         if sl_pct <= 0:
             return Sizing(0, 1, 0, 0, False, "SL mesafesi 0")
         notional = risk_usd / sl_pct
-        # Dinamik kaldıraç: equity'ye göre, paritenin + kullanıcının max'ıyla sınırlı
-        lever = max(1, math.ceil(notional / equity)) if equity > 0 else 1
-        lever = int(min(lever, inst.max_lever, max_user_lever))
+        if aggressive_leverage:
+            # Max kaldıraç → margin minimum (az parayla çok pozisyon)
+            lever = int(min(inst.max_lever, max_user_lever))
+        else:
+            lever = max(1, math.ceil(notional / equity)) if equity > 0 else 1
+            lever = int(min(lever, inst.max_lever, max_user_lever))
+        lever = max(1, lever)
         # Kontrat adedi: notional (USD) / (fiyat * ctVal coin)
         coin_per_ct = price * inst.ct_val
         sz_raw = notional / coin_per_ct if coin_per_ct > 0 else 0
