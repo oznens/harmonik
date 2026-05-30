@@ -22,12 +22,16 @@ from terminal.data.okx_instruments import OkxInstruments
 from terminal.data.okx_trade import OkxAuthError, OkxDemoClient
 from terminal.db.store import Store
 from terminal.detection.models import Setup
+from terminal.quality.pamonic import pamonic_confluence
 
 log = logging.getLogger(__name__)
 
 RISK_PER_TRADE_USD = 20.0
 INITIAL_EQUITY_USD = 1000.0
 MAX_USER_LEVER = 50          # kullanıcı tavanı (parite max'ı bundan düşükse o geçerli)
+OB_STOP_BUFFER = 0.001       # OB kenarına %0.1 tampon (iğne payı)
+PAMONIC_NEAR_BARS = 15       # OB D'nin son N barında olmalı (taze)
+PAMONIC_MIN_DISP = 0.003     # OB min impuls
 
 
 @dataclass
@@ -59,15 +63,42 @@ class OkxDemoEngine:
                  instruments: OkxInstruments,
                  risk_per_trade: float = RISK_PER_TRADE_USD,
                  initial_equity: float = INITIAL_EQUITY_USD,
-                 max_lever: int = MAX_USER_LEVER) -> None:
+                 max_lever: int = MAX_USER_LEVER,
+                 pamonic: bool = False) -> None:
+        """pamonic=True: PaMonic modu — OB yoksa pas geç (enforce), OB varsa
+        stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef)."""
         self.store = store
         self.client = client
         self.instruments = instruments
         self.risk = risk_per_trade
         self.initial_equity = initial_equity
         self.max_lever = max_lever
+        self.pamonic = pamonic
         self._lock = threading.RLock()
         self._migrate()
+
+    def _pamonic_levels(self, setup: Setup, klines: list | None):
+        """PaMonic modu seviyeleri. Returns (stop, tp, ok) ya da OB yoksa (.,.,False).
+
+        OB ara (D bölgesi mumlarında). Yoksa → ok=False (pas geç, enforce).
+        Varsa → stop = OB arkası (dar), tp = yapısal harmonik hedef (tp2=A; tradermiraz
+        'R:R uçar' → uzak yapısal hedef). Dar stop + uzak TP = yüksek R:R.
+        """
+        if not klines or len(klines) < 5:
+            return None, None, False
+        d_idx = next((i for i, k in enumerate(klines)
+                      if k["open_time"] == setup.pivots["D"].time), len(klines) - 1)
+        ob = pamonic_confluence(setup, klines, min_displacement=PAMONIC_MIN_DISP,
+                                near_bars=PAMONIC_NEAR_BARS, d_index=d_idx)
+        if ob is None:
+            return None, None, False
+        if setup.direction == "bull":
+            stop = ob.bottom * (1 - OB_STOP_BUFFER)
+        else:
+            stop = ob.top * (1 + OB_STOP_BUFFER)
+        # Yapısal TP: tp2 (A noktası, en uzak harmonik hedef). tp2 yoksa tp1.
+        tp = setup.tp2 if setup.tp2 else setup.tp1
+        return stop, tp, True
 
     def _migrate(self) -> None:
         self.store._conn.execute("""
@@ -93,8 +124,13 @@ class OkxDemoEngine:
         except (OkxAuthError, ValueError, IndexError, KeyError):
             return self.initial_equity
 
-    def open_trade(self, setup: Setup, setup_id: int, opened_at: int) -> OkxTrade | None:
-        """Setup AKTIF olunca OKX demo'ya iliştirilmiş TP/SL'li limit emir at."""
+    def open_trade(self, setup: Setup, setup_id: int, opened_at: int,
+                   klines: list | None = None) -> OkxTrade | None:
+        """Setup AKTIF olunca OKX demo'ya iliştirilmiş TP/SL'li limit emir at.
+
+        klines: PaMonic modunda OB tespiti için D bölgesi mumları (yoksa OB
+        bulunamaz → enforce: pas geç).
+        """
         with self._lock:
             # Zaten açık mı (aynı setup) / parite başı tek pozisyon
             if self.store._conn.execute(
@@ -108,9 +144,20 @@ class OkxDemoEngine:
                 log.info("OKX SKIP: %s zaten açık pozisyonda (parite başı tek)", setup.symbol)
                 return None
 
+            # PaMonic modu: OB seviyeleri (dar stop + yapısal TP). OB yoksa pas geç.
+            if self.pamonic:
+                ob_stop, ob_tp, ok = self._pamonic_levels(setup, klines)
+                if not ok:
+                    log.info("OKX SKIP (PaMonic): %s %s OB yok → pas geç (enforce)",
+                             setup.symbol, setup.interval)
+                    return None
+                stop_level, tp_level = ob_stop, ob_tp
+            else:
+                stop_level, tp_level = setup.stop, setup.tp1
+
             equity = self._equity()
             sizing = self.instruments.size_for(
-                setup.symbol, setup.entry, setup.stop, setup.entry,
+                setup.symbol, setup.entry, stop_level, setup.entry,
                 risk_usd=self.risk, equity=equity, max_user_lever=self.max_lever)
             if sizing is None or not sizing.ok:
                 log.info("OKX SKIP: %s boyut hesaplanamadı (%s)", setup.symbol,
@@ -120,8 +167,8 @@ class OkxDemoEngine:
             inst = self.instruments.get(setup.symbol)
             side = "buy" if setup.direction == "bull" else "sell"
             entry_px = inst.round_px(setup.entry)
-            tp_px = inst.round_px(setup.tp1)
-            sl_px = inst.round_px(setup.stop)
+            tp_px = inst.round_px(tp_level)
+            sl_px = inst.round_px(stop_level)
             cl_id = f"h{setup_id}"[:32]
 
             self.client.set_leverage(setup.symbol, sizing.leverage)

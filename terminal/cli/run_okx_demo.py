@@ -52,7 +52,7 @@ class OkxWorker:
 
     def __init__(self, symbol: str, interval: str, data: OkxFuturesClient,
                  store: Store, engine: OkxDemoEngine, poll_seconds: int,
-                 startup_delay: float, use_htf: bool) -> None:
+                 startup_delay: float, use_htf: bool, pamonic: bool = False) -> None:
         self.symbol = symbol
         self.interval = interval
         self.data = data
@@ -61,16 +61,20 @@ class OkxWorker:
         self.poll_seconds = poll_seconds
         self.startup_delay = startup_delay
         self.use_htf = use_htf
+        # PaMonic modunda yapısal TP (tp2=A) lazım → structural tara; yoksa rr1.
+        self.target_mode = "structural" if pamonic else "rr1"
         self._running = False
         self._tag = f"[OKX {symbol} {interval}]"
         self._last_open: int | None = None
+        self._klines: list[dict[str, Any]] = []   # son tarama mumları (PaMonic OB için)
 
     def _on_transition(self, t) -> None:
         # Sadece AKTIF geçişinde demo emri at (paper'ın limit moduna benzer)
         if t.new_state == "Aktif" and t.setup_id is not None:
             if t.setup.elenen:
                 return
-            self.engine.open_trade(t.setup, t.setup_id, t.trigger_time)
+            self.engine.open_trade(t.setup, t.setup_id, t.trigger_time,
+                                   klines=self._klines)
 
     def run(self) -> None:
         time.sleep(self.startup_delay)
@@ -82,6 +86,7 @@ class OkxWorker:
         while self._running:
             try:
                 klines = self.data.klines(self.symbol, self.interval, limit=200)
+                self._klines = klines   # PaMonic OB tespiti için sakla
                 if len(klines) >= 20:
                     htf_klines = None
                     if self.use_htf and htf_for(self.interval):
@@ -92,7 +97,7 @@ class OkxWorker:
                             htf_klines = None
                     setups = scan_klines(klines, self.symbol, self.interval,
                                          zigzag_threshold=thr, htf_klines=htf_klines,
-                                         target_mode="rr1", include_abcd=True)
+                                         target_mode=self.target_mode, include_abcd=True)
                     for s in setups:
                         sid = self.store.upsert_setup(s)
                         if self.store.get_lifecycle(sid) is None:
@@ -130,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sync-seconds", type=int, default=30)
     ap.add_argument("--risk", type=float, default=20.0)
     ap.add_argument("--max-lever", type=int, default=50)
+    ap.add_argument("--pamonic", action="store_true",
+                    help="PaMonic modu: OB yoksa pas geç (enforce), OB varsa dar "
+                         "stop (OB arkası) + yapısal TP. OB filtreli A/B testi.")
     ap.add_argument("--no-htf", action="store_true")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
@@ -160,10 +168,11 @@ def main(argv: list[str] | None = None) -> int:
     store = Store()
     instruments = OkxInstruments()
     engine = OkxDemoEngine(store, trade_client, instruments,
-                           risk_per_trade=args.risk, max_lever=args.max_lever)
+                           risk_per_trade=args.risk, max_lever=args.max_lever,
+                           pamonic=args.pamonic)
 
-    log.info("OKX hat: %d kombinasyon, poll %ds, sync %ds",
-             len(combos), args.poll_seconds, args.sync_seconds)
+    log.info("OKX hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s",
+             len(combos), args.poll_seconds, args.sync_seconds, args.pamonic)
 
     workers: list[OkxWorker] = []
     threads: list[threading.Thread] = []
@@ -171,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         w = OkxWorker(sym, iv, OkxFuturesClient(), store, engine,
                       poll_seconds=args.poll_seconds,
                       startup_delay=idx * (args.stagger_ms / 1000.0),
-                      use_htf=not args.no_htf)
+                      use_htf=not args.no_htf, pamonic=args.pamonic)
         workers.append(w)
         threads.append(threading.Thread(target=w.run, name=f"okx-{sym}-{iv}",
                                         daemon=True))

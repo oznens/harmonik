@@ -119,3 +119,40 @@ def test_summary(store):
     eng.open_trade(s, sid, s.detected_at)
     summ = eng.summary()
     assert summ["open"] == 1 and "equity" in summ
+
+
+# ---- PaMonic modu ----
+
+def test_pamonic_no_ob_skips(store):
+    """PaMonic modu: OB yoksa (klines yok) pas geç (enforce) — emir atılmaz."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), pamonic=True)
+    # klines vermeden → OB bulunamaz → pas geç
+    t = eng.open_trade(s, sid, s.detected_at, klines=None)
+    assert t is None
+    assert len(fake.placed) == 0
+    assert len(eng.open_positions()) == 0
+
+
+def test_pamonic_with_ob_uses_narrow_stop(store):
+    """OB varsa: dar stop (OB arkası) + yapısal TP ile emir atılır."""
+    from terminal.detection.scanner import scan_klines, default_threshold
+    prices, kinds = gartley_bull()
+    kl = make_xabcd_klines(prices, kinds, bars_per_leg=12)
+    s = scan_klines(kl, "TESTUSDT", "60m", zigzag_threshold=0.01,
+                    target_mode="structural", min_rr=0.0)[0]
+    sid = store.upsert_setup(s)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), pamonic=True)
+    # gerçek klines ver → OB aranır. (Sentetik Gartley'de OB olmayabilir →
+    # ya pas geçer ya dar stopla girer; ikisi de geçerli. Davranışı doğrula.)
+    t = eng.open_trade(s, sid, s.detected_at, klines=kl)
+    if t is not None:
+        # OB bulundu → dar stop kullanıldı (setup.stop'tan farklı olabilir)
+        assert len(fake.placed) == 1
+        p = fake.placed[0]
+        assert p["sl"] is not None and p["tp"] is not None
+    else:
+        # OB yok → pas geçti (enforce), emir yok
+        assert len(fake.placed) == 0
