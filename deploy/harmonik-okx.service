@@ -20,6 +20,7 @@ ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_de
     --sync-seconds 30 \
     --risk 20 \
     --max-lever 50 \
+    --pamonic \
     --log-level INFO
 Restart=on-failure
 RestartSec=10
