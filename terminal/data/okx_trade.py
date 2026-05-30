@@ -199,6 +199,13 @@ class OkxDemoClient:
         data = p.get("data", [{}])
         return data[0] if data else {}
 
+    def positions_history(self, inst_type: str = "SWAP",
+                          limit: int = 100) -> list[dict[str, Any]]:
+        """Kapanmış pozisyon geçmişi — realizedPnl içerir (P&L kesinleştirme)."""
+        p = self._request(
+            "GET", f"/api/v5/account/positions-history?instType={inst_type}&limit={limit}")
+        return p.get("data", [])
+
     def ping_auth(self) -> bool:
         """Kimlik doğru mu — bakiye çekmeyi dener."""
         try:
