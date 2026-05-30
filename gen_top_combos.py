@@ -71,6 +71,43 @@ def mexc_futures_usdt_bases(client: MexcFuturesClient) -> set[str]:
     return bases
 
 
+def okx_swap_usdt_bases() -> set[str]:
+    """OKX'te USDT-SWAP olarak işlem gören baz semboller (BTC, ETH...).
+
+    OKX public instruments endpoint (kimlik gerektirmez)."""
+    bases: set[str] = set()
+    with httpx.Client(timeout=20.0, headers={"User-Agent": "harmonik/1.0"}) as c:
+        r = c.get("https://www.okx.com/api/v5/public/instruments",
+                  params={"instType": "SWAP"})
+        r.raise_for_status()
+        for d in r.json().get("data", []):
+            inst = d.get("instId", "")          # örn BTC-USDT-SWAP
+            if inst.endswith("-USDT-SWAP"):
+                bases.add(inst[: -len("-USDT-SWAP")])
+    return bases
+
+
+def okx_volume_bases() -> list[tuple[str, float]]:
+    """OKX USDT-SWAP'leri 24s USDT cirosuna göre sıralı [(BASEUSDT, vol), ...]."""
+    with httpx.Client(timeout=20.0, headers={"User-Agent": "harmonik/1.0"}) as c:
+        r = c.get("https://www.okx.com/api/v5/market/tickers",
+                  params={"instType": "SWAP"})
+        r.raise_for_status()
+        data = r.json().get("data", [])
+    out: list[tuple[str, float]] = []
+    for t in data:
+        inst = t.get("instId", "")
+        if inst.endswith("-USDT-SWAP"):
+            base = inst[: -len("-USDT-SWAP")]
+            try:
+                vol = float(t.get("volCcy24h") or 0)   # 24s USDT cirosu
+            except (TypeError, ValueError):
+                vol = 0.0
+            out.append((base + "USDT", vol))
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
+
+
 def coingecko_by_marketcap(per_page: int = 250) -> list[tuple[str, float]]:
     """CoinGecko piyasa değeri (market cap) sıralı [(SEMBOL, market_cap), ...]."""
     with httpx.Client(timeout=20.0, headers={"User-Agent": "harmonik/1.0"}) as c:
@@ -123,12 +160,27 @@ def top_volume(client: MexcFuturesClient, n: int) -> list[tuple[str, float]]:
     return usdt[:n]
 
 
+def top_okx_marketcap(n: int) -> list[tuple[str, float]]:
+    """CoinGecko piyasa değeri × OKX USDT-SWAP kesişimi (MEXC'siz, OKX'e göre)."""
+    bases = okx_swap_usdt_bases()
+    ranked = coingecko_by_marketcap(250)
+    return pick_intersect(ranked, bases, n)
+
+
+def top_okx_volume(n: int) -> list[tuple[str, float]]:
+    """OKX 24s cirosuna göre top N USDT-SWAP (dışlananlar hariç)."""
+    out = [(sym, v) for sym, v in okx_volume_bases()
+           if sym[:-4] not in EXCLUDE_BASE]
+    return out[:n]
+
+
 def render(combos: list[tuple[str, float]], tfs: list[str], source: str) -> str:
-    metric = "piyasa değeri" if source == "marketcap" else "24s ciro"
+    metric = "24s ciro" if "volume" in source else "piyasa değeri"
+    src_note = "OKX SWAP" if source.startswith("okx") else "MEXC futures"
     lines = [
         "# Canlı tarama kombinasyonları (parite + TF).",
         f"# OTOMATİK ÜRETİLDİ: gen_top_combos.py — {metric} sıralaması "
-        "(MEXC futures'ta işlem görenler).",
+        f"({src_note}'ta işlem görenler).",
         f"# {len(combos)} parite × {len(tfs)} TF = {len(combos) * len(tfs)} kombinasyon.",
         "",
     ]
@@ -146,8 +198,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--top", type=int, default=50, help="Parite sayısı (varsayılan 50)")
     ap.add_argument("--tfs", default=",".join(DEFAULT_TFS),
                     help="Virgüllü TF listesi (varsayılan: 15m,30m,60m,4h,1d)")
-    ap.add_argument("--source", choices=["marketcap", "volume"], default="marketcap",
-                    help="Sıralama: marketcap (CoinGecko, varsayılan) veya volume (MEXC 24s)")
+    ap.add_argument("--source",
+                    choices=["marketcap", "volume", "okx-marketcap", "okx-volume"],
+                    default="marketcap",
+                    help="marketcap/volume = MEXC; okx-marketcap (CoinGecko×OKX) / "
+                         "okx-volume (OKX 24s ciro) = OKX SWAP'lerinden seç")
     ap.add_argument("--out", default="config/tracked_combos.txt", help="Çıktı dosyası")
     ap.add_argument("--dry-run", action="store_true", help="Sadece listele, yazma")
     args = ap.parse_args(argv)
@@ -157,25 +212,31 @@ def main(argv: list[str] | None = None) -> int:
         print("HATA: en az bir TF gerekli", file=sys.stderr)
         return 1
 
-    client = MexcFuturesClient()
     try:
-        if args.source == "marketcap":
-            combos = top_marketcap(client, args.top)
+        if args.source == "okx-marketcap":
+            combos = top_okx_marketcap(args.top)
+        elif args.source == "okx-volume":
+            combos = top_okx_volume(args.top)
         else:
-            combos = top_volume(client, args.top)
+            client = MexcFuturesClient()
+            try:
+                combos = (top_marketcap(client, args.top) if args.source == "marketcap"
+                          else top_volume(client, args.top))
+            finally:
+                client.close()
     except httpx.HTTPError as e:
         print(f"HATA: veri çekilemedi ({type(e).__name__}: {e})", file=sys.stderr)
-        client.close()
         return 1
-    finally:
-        client.close()
 
     if not combos:
         print("HATA: parite seçilemedi (liste boş).", file=sys.stderr)
         return 1
 
-    metric_lbl = "piyasa değeri" if args.source == "marketcap" else "24s ciro"
-    print(f"Top {len(combos)} parite ({metric_lbl}, MEXC futures'ta işlem görenler):")
+    _lbls = {"marketcap": "piyasa değeri", "okx-marketcap": "piyasa değeri (OKX)",
+             "volume": "24s ciro", "okx-volume": "24s ciro (OKX)"}
+    metric_lbl = _lbls.get(args.source, args.source)
+    src_note = "OKX SWAP" if args.source.startswith("okx") else "MEXC futures"
+    print(f"Top {len(combos)} parite ({metric_lbl}, {src_note}'ta işlem görenler):")
     for i, (sym, v) in enumerate(combos, 1):
         print(f"  {i:2d}. {sym:<14s} {metric_lbl} ≈ ${v:,.0f}")
     print(f"\nTF'ler: {', '.join(tfs)}  →  {len(combos) * len(tfs)} kombinasyon")
