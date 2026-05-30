@@ -132,8 +132,10 @@ class OkxDemoClient:
     def place_order(self, symbol: str, side: str, sz: str,
                     ord_type: str = "limit", px: str | None = None,
                     td_mode: str = "cross", pos_side: str | None = None,
-                    cl_ord_id: str | None = None) -> dict[str, Any]:
-        """Demo SWAP emri gönder.
+                    cl_ord_id: str | None = None,
+                    tp_trigger: str | None = None, sl_trigger: str | None = None,
+                    lever: int | None = None) -> dict[str, Any]:
+        """Demo SWAP emri gönder (opsiyonel iliştirilmiş TP/SL).
 
         Args:
             symbol: BTCUSDT (→ BTC-USDT-SWAP).
@@ -144,6 +146,8 @@ class OkxDemoClient:
             td_mode: "cross" | "isolated".
             pos_side: "long" | "short" (hedge modunda); None=net mod.
             cl_ord_id: müşteri emir id (idempotent takip).
+            tp_trigger/sl_trigger: iliştirilmiş TP/SL tetik fiyatı (parent dolunca
+                aktif; market'ten kapat → ordPx=-1). OKX attachAlgoOrds.
         Returns: OKX data[0] (ordId, clOrdId, sCode, sMsg...).
         """
         body: dict[str, Any] = {
@@ -156,9 +160,31 @@ class OkxDemoClient:
             body["posSide"] = pos_side
         if cl_ord_id:
             body["clOrdId"] = cl_ord_id
+        # İliştirilmiş TP/SL (parent dolunca aktif; -1 = market çıkış)
+        if tp_trigger or sl_trigger:
+            algo: dict[str, Any] = {}
+            if tp_trigger:
+                algo["tpTriggerPx"] = tp_trigger
+                algo["tpOrdPx"] = "-1"
+            if sl_trigger:
+                algo["slTriggerPx"] = sl_trigger
+                algo["slOrdPx"] = "-1"
+            body["attachAlgoOrds"] = [algo]
         p = self._request("POST", "/api/v5/trade/order", body)
         data = p.get("data", [{}])
         return data[0] if data else {}
+
+    def set_leverage(self, symbol: str, lever: int, td_mode: str = "cross") -> dict:
+        """Parite için kaldıraç ayarla (emir öncesi). Hata olursa yutar (best-effort)."""
+        try:
+            p = self._request("POST", "/api/v5/account/set-leverage",
+                              {"instId": _to_inst(symbol), "lever": str(lever),
+                               "mgnMode": td_mode})
+            data = p.get("data", [{}])
+            return data[0] if data else {}
+        except OkxAuthError as e:
+            log.warning("set_leverage(%s, %sx): %s", symbol, lever, e)
+            return {}
 
     def cancel_order(self, symbol: str, ord_id: str) -> dict[str, Any]:
         p = self._request("POST", "/api/v5/trade/cancel-order",

@@ -64,3 +64,40 @@ def test_live_mode_no_demo_header():
     c.api_key, c.secret, c.passphrase, c.demo = "k", "s", "p", False
     h = c._headers("GET", "/x", "")
     assert "x-simulated-trading" not in h
+
+
+def test_place_order_body_with_tpsl(monkeypatch):
+    # _request'i yakala, gönderilen body'yi doğrula (ağ yok)
+    c = OkxDemoClient.__new__(OkxDemoClient)
+    c.api_key, c.secret, c.passphrase, c.demo = "k", "s", "p", True
+    captured = {}
+
+    def fake_request(method, path, body=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["body"] = body
+        return {"data": [{"ordId": "1", "sCode": "0"}]}
+
+    c._request = fake_request
+    r = c.place_order("BTCUSDT", "buy", "1", ord_type="limit", px="70000",
+                      tp_trigger="75000", sl_trigger="68000")
+    b = captured["body"]
+    assert captured["path"] == "/api/v5/trade/order"
+    assert b["instId"] == "BTC-USDT-SWAP" and b["side"] == "buy"
+    assert b["px"] == "70000" and b["sz"] == "1"
+    # TP/SL attachAlgoOrds doğru kuruldu
+    algo = b["attachAlgoOrds"][0]
+    assert algo["tpTriggerPx"] == "75000" and algo["tpOrdPx"] == "-1"
+    assert algo["slTriggerPx"] == "68000" and algo["slOrdPx"] == "-1"
+    assert r["ordId"] == "1"
+
+
+def test_place_order_no_tpsl_no_algo():
+    c = OkxDemoClient.__new__(OkxDemoClient)
+    c.api_key, c.secret, c.passphrase, c.demo = "k", "s", "p", True
+    captured = {}
+    c._request = lambda m, p, body=None: (captured.update(body=body) or
+                                          {"data": [{"ordId": "1"}]})
+    c.place_order("BTCUSDT", "sell", "2", ord_type="market")
+    assert "attachAlgoOrds" not in captured["body"]
+    assert "px" not in captured["body"]   # market → fiyat yok
