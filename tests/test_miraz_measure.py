@@ -29,18 +29,22 @@ def test_bucket_math():
     assert b.total_r == 0.5
 
 
-def test_harmonic_buckets_filtering():
+def test_harmonic_buckets():
     recs = [
-        HarmonicRecord("TP", 1.0, fraktal=True, pamonic=True),
-        HarmonicRecord("STOP", -1.0, fraktal=True, pamonic=False),
-        HarmonicRecord("TP", 1.0, fraktal=False, pamonic=True),
-        HarmonicRecord("STOP", -1.0, fraktal=False, pamonic=False),
+        # limit_outcome, limit_r, fraktal_outcome, fraktal_r, pamonic
+        HarmonicRecord("TP", 1.0, "TP", 1.0, pamonic=True),
+        HarmonicRecord("STOP", -1.0, "EO", 0.0, pamonic=False),
+        HarmonicRecord("TP", 1.0, "STOP", -1.0, pamonic=True),
+        HarmonicRecord("STOP", -1.0, "TP", 1.0, pamonic=False),
     ]
-    baz, frak, pamo, both = harmonic_buckets(recs)
-    assert baz.passed == 4 and baz.win_rate == 50.0 and baz.total_r == 0.0
-    assert frak.passed == 2 and frak.win_rate == 50.0
+    limit, frak, pamo = harmonic_buckets(recs)
+    # Limit baz: 2 TP / 2 STOP → %50, 0R
+    assert limit.passed == 4 and limit.win_rate == 50.0 and limit.total_r == 0.0
+    # Fraktal: TP, EO, STOP, TP → tp=2 stop=1 other=1 → %66.7
+    assert frak.tp == 2 and frak.stop == 1 and frak.other == 1
+    assert abs(frak.win_rate - 66.666) < 0.1 and frak.total_r == 1.0
+    # PaMonic filtresi (limit outcome'lar, pamonic=True olanlar): rec1 TP, rec3 TP
     assert pamo.passed == 2 and pamo.tp == 2 and pamo.win_rate == 100.0 and pamo.total_r == 2.0
-    assert both.passed == 1 and both.tp == 1 and both.win_rate == 100.0
 
 
 def test_simulate_two_618_tp():

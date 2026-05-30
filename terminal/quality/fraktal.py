@@ -120,3 +120,34 @@ def fraktal_break_index(
         if (bull and close > ref.price) or (not bull and close < ref.price):
             return i
     return None
+
+
+def simulate_fraktal_entry(
+    future: list[dict[str, Any]],
+    direction: str,
+    stop: float,
+    tp1: float,
+    threshold: float = 0.0,
+) -> tuple[str, float | None]:
+    """Fraktal teyitli GECİKMELİ giriş simülasyonu.
+
+    Fraktal kırılımını bekler (fraktal_break_index), kırılım barının SONRAKİ
+    barının açılışından girer (market), sonra stop/tp1 (önce STOP — canlı motorla
+    tutarlı). Kırılım gelmezse "EO" (işlem açılmaz).
+
+    Returns: (outcome, actual_entry). actual_entry None = giriş olmadı.
+    """
+    bi = fraktal_break_index(future, direction, threshold)
+    if bi is None or bi + 1 >= len(future):
+        return ("EO", None)
+    actual = future[bi + 1]["open"]
+    bull = direction == "bull"
+    for j in range(bi + 1, len(future)):
+        bar = future[j]
+        hit_sl = (bull and bar["low"] <= stop) or (not bull and bar["high"] >= stop)
+        hit_tp = (bull and bar["high"] >= tp1) or (not bull and bar["low"] <= tp1)
+        if hit_sl:
+            return ("STOP", actual)
+        if hit_tp:
+            return ("TP", actual)
+    return ("Aktif", actual)

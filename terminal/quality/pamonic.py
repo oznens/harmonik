@@ -68,15 +68,21 @@ def pamonic_confluence(
     setup: Setup,
     klines: list[dict[str, Any]],
     min_displacement: float = 0.0,
+    near_bars: int | None = None,
+    d_index: int | None = None,
 ) -> OrderBlock | None:
     """Harmonik D'nin (PRZ) bir Order Block ile çakışması — PaMonic.
 
     bull setup → PRZ ile çakışan bir BULL (demand) emir bloğu ara.
     bear setup → BEAR (supply) bloğu ara.
 
-    Look-ahead: çağıran taraf klines'i KARAR anına (confirm/giriş) kadar keserek
-    verir — OB'nin impulsu D'den sonra olur, confirm anında bilinir (sistemin
-    geri kalanıyla aynı disiplin). Tercih: mitige olmamış + en yeni (D'ye yakın).
+    Sıkılaştırma (tradermiraz: "nadir ama güçlü"):
+        min_displacement: impuls gücü eşiği (zayıf OB'leri ele).
+        near_bars + d_index: OB yalnız D'nin son `near_bars` barı içinde
+            oluşmuşsa say (D'deki taze OB; uzaktaki rastlantısal blokları ele).
+
+    Look-ahead: çağıran taraf klines'i KARAR anına kadar keserek verir.
+    Tercih: mitige olmamış + en yeni (D'ye en yakın).
 
     Returns: çakışan blok, yoksa None.
     """
@@ -84,6 +90,8 @@ def pamonic_confluence(
     want = setup.direction  # "bull" | "bear"
     cands = [o for o in obs
              if o.kind == want and o.overlaps(setup.prz_low, setup.prz_high)]
+    if near_bars is not None and d_index is not None:
+        cands = [o for o in cands if d_index - near_bars <= o.index <= d_index + 2]
     if not cands:
         return None
     unmit = [o for o in cands if not o.mitigated]

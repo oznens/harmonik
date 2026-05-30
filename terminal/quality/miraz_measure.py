@@ -9,7 +9,7 @@ yükseltiyor mu, 2-618 tek başına nasıl performe ediyor — sayıyla görmek.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from terminal.detection.two_618 import Pattern2618
 
@@ -45,31 +45,29 @@ class Bucket:
 
 @dataclass
 class HarmonicRecord:
-    """Tek harmonik setup'ın ölçüm verisi."""
-    outcome: str           # TP/STOP/EO/...
-    r: float               # trade_r ile hesaplanan R
-    fraktal: bool          # fraktal teyit var mı (D'den sonra, karar anına dek)
-    pamonic: bool          # OB@D (PaMonic) çakışması var mı
-
-
-_HARMONIC_FILTERS: list[tuple[str, Callable[[HarmonicRecord], bool]]] = [
-    ("Baz (tüm harmonik)", lambda r: True),
-    ("+ Fraktal teyit",     lambda r: r.fraktal),
-    ("+ PaMonic (OB@D)",    lambda r: r.pamonic),
-    ("+ Fraktal & PaMonic", lambda r: r.fraktal and r.pamonic),
-]
+    """Tek harmonik setup'ın ölçüm verisi (iki giriş modu + PaMonic filtresi)."""
+    limit_outcome: str         # LİMİT giriş outcome (baz)
+    limit_r: float
+    fraktal_outcome: str       # FRAKTAL teyitli gecikmeli giriş outcome
+    fraktal_r: float
+    pamonic: bool              # sıkı OB@D (PaMonic) çakışması var mı
 
 
 def harmonic_buckets(records: list[HarmonicRecord]) -> list[Bucket]:
-    """Harmonik setupları filtre kovalarına göre topla (Baz / +fraktal / +PaMonic)."""
-    out: list[Bucket] = []
-    for name, pred in _HARMONIC_FILTERS:
-        b = Bucket(name)
-        for rec in records:
-            if pred(rec):
-                b.add(rec.outcome, rec.r)
-        out.append(b)
-    return out
+    """Üç kova: Limit (baz) · Fraktal teyitli giriş · Limit + PaMonic (sıkı).
+
+    Limit vs Fraktal = giriş MODU kıyası (aynı setuplar, farklı giriş).
+    Limit + PaMonic = filtre kıyası (PaMonic'li setuplar, limit giriş).
+    """
+    limit = Bucket("Limit giriş (baz)")
+    frak = Bucket("Fraktal teyitli giriş")
+    pamo = Bucket("Limit + PaMonic (sıkı)")
+    for r in records:
+        limit.add(r.limit_outcome, r.limit_r)
+        frak.add(r.fraktal_outcome, r.fraktal_r)
+        if r.pamonic:
+            pamo.add(r.limit_outcome, r.limit_r)
+    return [limit, frak, pamo]
 
 
 def simulate_two_618(pat: Pattern2618, future: list[dict[str, Any]]) -> str:

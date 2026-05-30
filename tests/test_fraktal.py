@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from terminal.detection.pivots import Pivot
 from terminal.quality.fraktal import (
-    fraktal_break_index, fraktal_confirm, fraktal_trend, swing_labels,
+    fraktal_break_index, fraktal_confirm, fraktal_trend, simulate_fraktal_entry,
+    swing_labels,
 )
 
 MS = 3_600_000
@@ -76,3 +77,17 @@ def test_fraktal_break_index():
     # düşen seride kırılım yok
     assert fraktal_break_index(_series([100, 99, 98, 97, 96, 95]), "bull",
                                threshold=0.004) is None
+
+
+def test_simulate_fraktal_entry_enters_on_break():
+    out, entry = simulate_fraktal_entry(_series(_BULL), "bull", stop=90.0,
+                                        tp1=100.0, threshold=0.004)
+    assert entry is not None                 # kırılım var → giriş oldu
+    assert out in ("TP", "STOP", "Aktif")
+
+
+def test_simulate_fraktal_entry_no_break():
+    falling = _series([100, 99, 98, 97, 96, 95])
+    out, entry = simulate_fraktal_entry(falling, "bull", stop=90.0, tp1=110.0,
+                                        threshold=0.004)
+    assert out == "EO" and entry is None     # kırılım yok → işlem açılmadı

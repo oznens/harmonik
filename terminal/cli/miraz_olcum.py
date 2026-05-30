@@ -24,11 +24,15 @@ from terminal.detection.two_618 import find_two_618
 from terminal.karakter.runner import _fetch_retry, _find_d_index
 from terminal.karakter.score import trade_r
 from terminal.karakter.simulator import simulate_outcome
-from terminal.quality.fraktal import fraktal_confirm
+from terminal.quality.fraktal import simulate_fraktal_entry
 from terminal.quality.miraz_measure import (
     Bucket, HarmonicRecord, format_buckets, harmonic_buckets, simulate_two_618,
 )
 from terminal.quality.pamonic import pamonic_confluence
+
+# PaMonic sıkılaştırma: OB D'nin son N barında + min impuls.
+PAMONIC_NEAR_BARS = 15
+PAMONIC_MIN_DISP = 0.003
 
 log = logging.getLogger(__name__)
 
@@ -75,13 +79,17 @@ def measure(client, symbols, intervals, bars, threshold=None, progress=None):
                 if ci is None or ci + 1 >= len(klines):
                     continue
                 future = klines[ci + 1:]
-                out = simulate_outcome(s, future, entry_mode="limit")
-                r = trade_r(s.entry, s.stop, s.tp1, out.outcome, actual_entry=s.entry)
-                # karar anına kadarki veri (look-ahead yok)
+                # Baz: LİMİT giriş (entry fiyatından)
+                lim = simulate_outcome(s, future, entry_mode="limit")
+                lim_r = trade_r(s.entry, s.stop, s.tp1, lim.outcome, actual_entry=s.entry)
+                # FRAKTAL teyitli gecikmeli giriş (kırılımı bekle, sonra gir)
+                fr_out, fr_entry = simulate_fraktal_entry(future, s.direction, s.stop, s.tp1)
+                fr_r = trade_r(s.entry, s.stop, s.tp1, fr_out, actual_entry=fr_entry)
+                # PaMonic (sıkı): karar anına kadarki veride D'ye yakın taze OB
                 hist = klines[:ci + 1]
-                fr = fraktal_confirm(hist, s.direction, since_time=s.pivots["D"].time)
-                pm = pamonic_confluence(s, hist) is not None
-                harmonic.append(HarmonicRecord(out.outcome, r, fr, pm))
+                pm = pamonic_confluence(s, hist, min_displacement=PAMONIC_MIN_DISP,
+                                        near_bars=PAMONIC_NEAR_BARS, d_index=d_idx) is not None
+                harmonic.append(HarmonicRecord(lim.outcome, lim_r, fr_out, fr_r, pm))
 
             # --- 2-618 (tek başına) ---
             for pat in find_two_618(pivots):
@@ -134,8 +142,9 @@ def main(argv: list[str] | None = None) -> int:
         print("")
         print(format_buckets("📐 2-618 Stratejisi", [b2618]))
         print("=" * 60 + "\n")
-        print("Yorum: '+ Fraktal teyit' ve '+ PaMonic' satırlarının WR'si 'Baz'dan")
-        print("belirgin yüksekse, filtre işe yarıyor demektir (Miraz'ın 8:1 dersi).")
+        print("Yorum: 'Fraktal teyitli giriş' ve 'Limit + PaMonic' satırlarının WR'si")
+        print("'Limit giriş (baz)'dan belirgin yüksekse filtre işe yarıyor (Miraz 8:1).")
+        print("PaMonic 'Setup' sayısı baz'a yakınsa filtre seçici değil (gevşek).")
         return 0
     finally:
         client.close()
