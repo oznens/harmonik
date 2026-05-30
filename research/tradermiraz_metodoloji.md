@@ -108,6 +108,26 @@ Yeni bir özellik/karar bu ilkelere uymuyorsa, uygulamadan ÖNCE tartışılır:
 - [ ] **Sadelik korunuyor mu?** Çok-ajanlı "konsey", ağır framework gibi
       fazlalıklar onun yaklaşımında yok — sade katmanlı filtre yeterli.
 
+## 8) 2-618 Stratejisi — DOĞRULANMIŞ spec (web kaynağı + kullanıcı tarifi)
+Kanonik "2618 formasyonu" (coinotag/coinnewstr) + kullanıcının görselli tarifi
+birebir aynı. `terminal/detection/two_618.py` bunu uygular.
+
+**Yapı:** BOZULMUŞ (neckline kırılmış) çift dip / çift tepe. Çift tepe: "boyun
+bölgesi kırıldıktan sonra fiyat düşer, ama düşüş sürmez ve tekrar yükselir."
+
+**Kurallar (alıntı):**
+- "trendi çeviren son harekete Fibonacci çekilir" → 4 (ikinci dip/tepe) → 5 (lokal uç) bacağı.
+- "0.618 Fibonacci seviyesine gelmesi ile işleme girilir" → giriş = 0.618 retracement.
+- Stop: "çift dip → dip noktasının altı; çift tepe → tepe noktasının üzeri" (= 4 seviyesi).
+- "Hedef noktaları sırasıyla 0 ile -0.272" → Hedef1 = 5 (0 seviyesi); Hedef2 = 1.272 uzama.
+
+**Bizim ek (tradermiraz'ın katkıları — base formasyonda YOK, opsiyonel):**
+trend filtresi (yön ELEME — bkz §2.5), momentum onayı, 0.5 seviyesi ikincil test.
+Şimdilik eklenmedi; ölçümden sonra değerlendirilir.
+
+Kaynak: coinotag.com/2618-formasyonu-nedir-nasil-kullanilir (HTTP doğrulandı,
+2026-05-30). Detektör R:R ~1.618 (0.618/0.382 geometrisi).
+
 ---
 
 *Bu döküm yaşayan bir belgedir; yeni tweet/analiz geldikçe güncellenir.*
