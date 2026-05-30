@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import random
 import signal
 import sys
@@ -58,6 +59,35 @@ CHOCH_WAIT_BARS = 12
 
 def _fmt(ms: int) -> str:
     return format_local(ms)
+
+
+# Price Action / SMC katmanı varsayılan SMC eşiği (master anahtar açıkken).
+PA_DEFAULT_MIN_SMC = 30
+
+
+def _env_truthy(val: str | None) -> bool:
+    return (val or "").strip().lower() in (
+        "1", "on", "true", "yes", "evet", "ac", "aç", "acik", "açık")
+
+
+def _resolve_pa(
+    price_action: bool | None,
+    env_on: bool,
+    ltf_choch: bool,
+    min_smc: int,
+    default_smc: int = PA_DEFAULT_MIN_SMC,
+) -> tuple[bool, int, bool]:
+    """Price Action ANA anahtarını çöz → (ltf_choch, min_smc, pa_on).
+
+    price_action: True (--price-action) / False (--no-price-action) / None (env'e bak).
+    Açıkken: CHoCH onayı zorunlu + SMC eşiği (elle verilmemişse default_smc).
+    Kapalıyken: SALT HARMONİK — ama granüler --ltf-choch/--min-smc yine de elle
+    açılabilir (bağımsız çalışırlar).
+    """
+    pa_on = env_on if price_action is None else price_action
+    if pa_on:
+        return True, (min_smc if min_smc > 0 else default_smc), True
+    return ltf_choch, min_smc, False
 
 
 class PairWorker:
@@ -682,6 +712,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="Yapısal filtre #4-6 (SMC): D noktası bölge skoru < eşik → "
                              "paper'a açma (0=kapalı). 30=en az bir bölge (OB/FVG/Sweep), "
                              "60=en az iki, 100=üçü birden. Backtest sweep'ine göre ayarla.")
+    parser.add_argument("--price-action", dest="price_action", action="store_true", default=None,
+                        help="ANA ANAHTAR: Price Action katmanını topluca AÇ "
+                             "(#3 CHoCH onayı + #4-6 SMC bölge >=30). Verilmezse "
+                             "HARMONIK_PRICE_ACTION env'ine bakar; o da yoksa KAPALI "
+                             "(salt harmonik).")
+    parser.add_argument("--no-price-action", dest="price_action", action="store_false",
+                        help="ANA ANAHTAR: Price Action katmanını KAPAT (salt harmonik) — "
+                             "env ayarını ezer.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -692,6 +730,13 @@ def main(argv: list[str] | None = None) -> int:
     # boğuyor (tracker.err'i şişiren satırlar) — sadece uyarı ve üstünü göster.
     for _noisy in ("httpx", "httpcore", "urllib3"):
         logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+    # Price Action ANA anahtarı: --price-action / --no-price-action / env.
+    ltf_choch, min_smc, pa_on = _resolve_pa(
+        args.price_action, _env_truthy(os.environ.get("HARMONIK_PRICE_ACTION")),
+        args.ltf_choch, args.min_smc)
+    log.info("PRICE ACTION: %s",
+             f"AÇIK (CHoCH onayı + SMC>={min_smc})" if pa_on else "KAPALI (salt harmonik)")
 
     # Combos-file > symbols+intervals cross-product
     if args.combos_file:
@@ -764,8 +809,8 @@ def main(argv: list[str] | None = None) -> int:
             paper_min_confluence=args.paper_min_confluence,
             paper_entry_mode=args.paper_entry_mode,
             min_time_symmetry=args.min_time_symmetry,
-            ltf_choch=args.ltf_choch,
-            min_smc=args.min_smc,
+            ltf_choch=ltf_choch,
+            min_smc=min_smc,
         )
         workers.append(w)
         t = threading.Thread(target=w.run, name=f"worker-{sym}-{iv}", daemon=True)

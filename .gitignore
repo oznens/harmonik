@@ -10,6 +10,7 @@ Thumbs.db
 # Ortam
 .env
 .env.local
+pa.env
 
 # Python
 __pycache__/

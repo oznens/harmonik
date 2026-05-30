@@ -26,6 +26,22 @@ mekanik kurallarla doğrulamasını şart koşarız.
 Bu dosya **#3 — CHoCH/MSB (giriş onayı)** ve **#4-6 — SMC bölge filtreleri
 (Order Block · FVG · Liquidity Sweep)** katmanlarını tanımlar. Hepsi uygulandı.
 
+### ANA ANAHTAR (tek düğme: PA açık ↔ salt harmonik)
+
+Tüm Price Action katmanını tek hamlede aç/kapat:
+
+| Yöntem | Aç | Kapat (salt harmonik) |
+|--------|-----|------------------------|
+| CLI | `--price-action` | `--no-price-action` (veya hiçbiri) |
+| Env | `HARMONIK_PRICE_ACTION=on` | `=off` (veya tanımsız) |
+
+`--price-action` = `--ltf-choch` + `--min-smc 30` (elle `--min-smc 60` verirsen o
+korunur). Hiçbiri verilmezse **varsayılan KAPALI = eski salt-harmonik davranış**.
+
+**Sunucuda (systemd) unit'e dokunmadan toggle:** `pa.env` dosyası (`EnvironmentFile`)
+içinde `HARMONIK_PRICE_ACTION=on|off` → değiştir + `systemctl restart harmonik`.
+Örnek: `deploy/pa.env.example`.
+
 ---
 
 ## #3 — CHoCH / MSB: Alt Zaman Dilimi Yapı Kırılımı

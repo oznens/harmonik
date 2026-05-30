@@ -8,6 +8,10 @@ Type=simple
 User=harmonik
 WorkingDirectory=/home/harmonik/harmonik
 Environment=PYTHONUNBUFFERED=1
+# Price Action ANA anahtarı buradan: pa.env içinde HARMONIK_PRICE_ACTION=on|off.
+# Dosya yoksa sorun değil (- ile opsiyonel) → varsayılan KAPALI (salt harmonik).
+# Açıp/kapatmak için: pa.env'i düzenle + `systemctl restart harmonik` (unit'e dokunma).
+EnvironmentFile=-/home/harmonik/harmonik/pa.env
 ExecStart=/home/harmonik/harmonik/venv/bin/python -m terminal.cli.run_live_multi \
     --combos-file config/tracked_combos.txt \
     --futures \
