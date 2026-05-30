@@ -300,15 +300,18 @@ def render_dashboard(db_path, refresh: int) -> str:
                 "stop_count, total_pnl FROM paper_account WHERE id = 1"
             ).fetchone()
             open_raw = conn.execute(
-                "SELECT setup_id, symbol, interval, pattern, direction, entry_price, "
-                "stop_price, tp1_price, position_usd, leverage, opened_at FROM paper_trades "
-                "WHERE closed_at IS NULL ORDER BY opened_at DESC"
+                "SELECT pt.setup_id, pt.symbol, pt.interval, pt.pattern, pt.direction, "
+                "pt.entry_price, pt.stop_price, pt.tp1_price, pt.position_usd, pt.leverage, "
+                "pt.opened_at, s.q_score, s.confluence_score "
+                "FROM paper_trades pt LEFT JOIN setups s ON s.id = pt.setup_id "
+                "WHERE pt.closed_at IS NULL ORDER BY pt.opened_at DESC"
             ).fetchall()
             closed_raw = conn.execute(
-                "SELECT setup_id, symbol, interval, pattern, direction, entry_price, "
-                "stop_price, tp1_price, exit_price, outcome, pnl_usd, leverage, closed_at "
-                "FROM paper_trades WHERE closed_at IS NOT NULL "
-                "ORDER BY closed_at DESC LIMIT 50"
+                "SELECT pt.setup_id, pt.symbol, pt.interval, pt.pattern, pt.direction, "
+                "pt.entry_price, pt.stop_price, pt.tp1_price, pt.exit_price, pt.outcome, "
+                "pt.pnl_usd, pt.leverage, pt.closed_at, s.q_score, s.confluence_score "
+                "FROM paper_trades pt LEFT JOIN setups s ON s.id = pt.setup_id "
+                "WHERE pt.closed_at IS NOT NULL ORDER BY pt.closed_at DESC LIMIT 50"
             ).fetchall()
             pattern_raw = conn.execute(
                 "SELECT pt.pattern AS pattern, "
@@ -393,6 +396,15 @@ def _rr_cls(rr: float) -> str:
     return "g" if rr >= 1.5 else "r" if rr < 1.0 else "d"
 
 
+def _score_cell(score) -> str:
+    """Skor (Q veya confluence) hücresi — yoksa '—', yüksekse yeşil, düşükse gri."""
+    if score is None:
+        return '<td class="d">—</td>'
+    s = int(score)
+    cls = "g" if s >= 70 else "r" if s < 40 else "d"
+    return f'<td class="{cls}">{s}</td>'
+
+
 def _sym_link(setup_id, symbol) -> str:
     """Parite hücresi → setup grafiği linki."""
     return (f'<a href="/chart?id={int(setup_id)}" '
@@ -404,7 +416,7 @@ def _open_table(rows: list) -> str:
         return '<div class="empty">Açık pozisyon yok.</div>'
     head = ("<table><thead><tr>"
             '<th class="l">Parite</th><th>TF</th><th class="l">Pattern</th><th>Yön</th>'
-            "<th>Entry</th><th>Stop</th><th>Hedef</th><th>R:R</th>"
+            "<th>Entry</th><th>Stop</th><th>Hedef</th><th>R:R</th><th>Q</th><th>Conf</th>"
             "<th>Pozisyon</th><th>Lev</th><th>Açıldı</th><th>Yaş</th>"
             "</tr></thead><tbody>")
     body = []
@@ -419,6 +431,7 @@ def _open_table(rows: list) -> str:
             f'<td>{_fmt_price(r["entry_price"])}</td><td>{_fmt_price(r["stop_price"])}</td>'
             f'<td>{_fmt_price(r["tp1_price"])}</td>'
             f'<td class="{_rr_cls(rr)}">{rr:.2f}</td>'
+            f'{_score_cell(r["q_score"])}{_score_cell(r["confluence_score"])}'
             f'<td>${r["position_usd"]:.0f}</td><td>{r["leverage"]:.0f}x</td>'
             f'<td class="d">{_fmt_ts(r["opened_at"])}</td>'
             f'<td class="d">{_fmt_age(r["opened_at"])}</td></tr>'
@@ -431,7 +444,7 @@ def _closed_table(rows: list) -> str:
         return '<div class="empty">Henüz kapanan trade yok.</div>'
     head = ("<table><thead><tr>"
             '<th class="l">Parite</th><th>TF</th><th class="l">Pattern</th><th>Yön</th>'
-            "<th>Entry</th><th>R:R</th><th>Exit</th><th>Sonuç</th><th>P&amp;L</th>"
+            "<th>Entry</th><th>R:R</th><th>Q</th><th>Conf</th><th>Exit</th><th>Sonuç</th><th>P&amp;L</th>"
             "<th>Lev</th><th>Kapandı</th>"
             "</tr></thead><tbody>")
     body = []
@@ -449,6 +462,7 @@ def _closed_table(rows: list) -> str:
             f'<td class="{dir_cls}">{dir_txt}</td>'
             f'<td>{_fmt_price(r["entry_price"])}</td>'
             f'<td class="{_rr_cls(rr)}">{rr:.2f}</td>'
+            f'{_score_cell(r["q_score"])}{_score_cell(r["confluence_score"])}'
             f'<td>{_fmt_price(r["exit_price"])}</td>'
             f'<td class="{out_cls}">{_e(out)}</td>'
             f'<td class="{pnl_cls}">{"+" if pnl >= 0 else ""}${pnl:.2f}</td>'
