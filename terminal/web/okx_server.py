@@ -79,15 +79,22 @@ def _connect(db):
 
 
 def _live_equity() -> str:
-    """OKX'ten canlı demo bakiye (kimlik varsa); yoksa '—'."""
+    """OKX'ten canlı futures/trading kullanılabilir USDT bakiyesi (availBal).
+    totalEq (tüm hesap 89k) değil — fiilen işleme açık olan (~5K)."""
     try:
         from terminal.data.okx_trade import OkxDemoClient
         c = OkxDemoClient()
         if not c.has_credentials():
             return "—"
-        eq = c.balance().get("totalEq")
+        b = c.balance()
         c.close()
-        return f"{float(eq):,.0f}" if eq else "—"
+        # USDT trading available (kullanılabilir margin) — futures'ta kullanılan
+        for d in b.get("details", []):
+            if d.get("ccy") == "USDT":
+                av = d.get("availBal") or d.get("availEq") or d.get("cashBal")
+                if av:
+                    return f"{float(av):,.0f}"
+        return "—"
     except Exception:
         return "—"
 
@@ -137,7 +144,7 @@ def render(db_path, refresh: int) -> str:
     equity = _live_equity()
 
     cards = f"""<div class="cards">
-      <div class="card"><div class="lbl">Demo Equity</div><div class="val">${equity}</div></div>
+      <div class="card"><div class="lbl">Kullanılabilir USDT</div><div class="val">${equity}</div></div>
       <div class="card"><div class="lbl">Toplam P&amp;L</div><div class="val {pnl_cls}">{'+' if total_pnl>=0 else ''}${total_pnl:.2f}</div></div>
       <div class="card"><div class="lbl">Win Rate</div><div class="val {'g' if wr>=50 else 'r'}">{wr:.0f}%</div></div>
       <div class="card"><div class="lbl">TP</div><div class="val g">{tp}</div></div>
