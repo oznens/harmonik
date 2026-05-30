@@ -69,8 +69,9 @@ def measure(client, symbols, intervals, bars, threshold=None, progress=None):
             thr = threshold if threshold is not None else default_threshold(interval)
             pivots = find_pivots(klines, thr)
 
-            # --- Harmonikler: baz + fraktal + PaMonic ---
-            setups = scan_klines(klines, symbol, interval, zigzag_threshold=thr)
+            # --- Harmonikler: baz + fraktal + PaMonic (rr1 = canlıyla tutarlı) ---
+            setups = scan_klines(klines, symbol, interval, zigzag_threshold=thr,
+                                 target_mode="rr1")
             for s in setups:
                 d_idx = _find_d_index(klines, s.pivots["D"].time)
                 if d_idx is None:
@@ -82,9 +83,10 @@ def measure(client, symbols, intervals, bars, threshold=None, progress=None):
                 # Baz: LİMİT giriş (entry fiyatından)
                 lim = simulate_outcome(s, future, entry_mode="limit")
                 lim_r = trade_r(s.entry, s.stop, s.tp1, lim.outcome, actual_entry=s.entry)
-                # FRAKTAL teyitli gecikmeli giriş (kırılımı bekle, sonra gir)
-                fr_out, fr_entry = simulate_fraktal_entry(future, s.direction, s.stop, s.tp1)
-                fr_r = trade_r(s.entry, s.stop, s.tp1, fr_out, actual_entry=fr_entry)
+                # FRAKTAL teyitli gecikmeli giriş + yapısal stop
+                fr_out, fr_entry, fr_stop = simulate_fraktal_entry(future, s.direction, s.tp1)
+                fr_r = trade_r(fr_entry or s.entry, fr_stop or s.stop, s.tp1,
+                               fr_out, actual_entry=fr_entry)
                 # PaMonic (sıkı): karar anına kadarki veride D'ye yakın taze OB
                 hist = klines[:ci + 1]
                 pm = pamonic_confluence(s, hist, min_displacement=PAMONIC_MIN_DISP,

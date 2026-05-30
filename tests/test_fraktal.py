@@ -80,14 +80,15 @@ def test_fraktal_break_index():
 
 
 def test_simulate_fraktal_entry_enters_on_break():
-    out, entry = simulate_fraktal_entry(_series(_BULL), "bull", stop=90.0,
-                                        tp1=100.0, threshold=0.004)
-    assert entry is not None                 # kırılım var → giriş oldu
+    out, entry, stop = simulate_fraktal_entry(_series(_BULL), "bull",
+                                              tp1=100.0, threshold=0.004)
+    assert entry is not None and stop is not None    # kırılım var → giriş + yapısal stop
+    assert stop < entry                              # bull: yapısal stop girişin altında
     assert out in ("TP", "STOP", "Aktif")
 
 
 def test_simulate_fraktal_entry_no_break():
     falling = _series([100, 99, 98, 97, 96, 95])
-    out, entry = simulate_fraktal_entry(falling, "bull", stop=90.0, tp1=110.0,
-                                        threshold=0.004)
-    assert out == "EO" and entry is None     # kırılım yok → işlem açılmadı
+    out, entry, stop = simulate_fraktal_entry(falling, "bull", tp1=110.0,
+                                              threshold=0.004)
+    assert out == "EO" and entry is None and stop is None   # kırılım yok → açılmadı

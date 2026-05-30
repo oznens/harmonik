@@ -125,29 +125,31 @@ def fraktal_break_index(
 def simulate_fraktal_entry(
     future: list[dict[str, Any]],
     direction: str,
-    stop: float,
     tp1: float,
     threshold: float = 0.0,
-) -> tuple[str, float | None]:
-    """Fraktal teyitli GECİKMELİ giriş simülasyonu.
+) -> tuple[str, float | None, float | None]:
+    """Fraktal teyitli GECİKMELİ giriş + YAPISAL stop (tradermiraz tarzı).
 
     Fraktal kırılımını bekler (fraktal_break_index), kırılım barının SONRAKİ
-    barının açılışından girer (market), sonra stop/tp1 (önce STOP — canlı motorla
-    tutarlı). Kırılım gelmezse "EO" (işlem açılmaz).
+    barının açılışından girer (market). Stop = kırılımdan ÖNCEKİ yapısal uç
+    (bull: o ana kadarki en düşük low; bear: en yüksek high) — geniş PRZ stop'u
+    değil, yapı bazlı tight stop. Sonra stop/tp1 (önce STOP).
 
-    Returns: (outcome, actual_entry). actual_entry None = giriş olmadı.
+    Returns: (outcome, actual_entry, stop). entry/stop None = giriş olmadı (EO).
     """
     bi = fraktal_break_index(future, direction, threshold)
     if bi is None or bi + 1 >= len(future):
-        return ("EO", None)
-    actual = future[bi + 1]["open"]
+        return ("EO", None, None)
     bull = direction == "bull"
+    pre = future[: bi + 1]
+    stop = min(b["low"] for b in pre) if bull else max(b["high"] for b in pre)
+    actual = future[bi + 1]["open"]
     for j in range(bi + 1, len(future)):
         bar = future[j]
         hit_sl = (bull and bar["low"] <= stop) or (not bull and bar["high"] >= stop)
         hit_tp = (bull and bar["high"] >= tp1) or (not bull and bar["low"] <= tp1)
         if hit_sl:
-            return ("STOP", actual)
+            return ("STOP", actual, stop)
         if hit_tp:
-            return ("TP", actual)
-    return ("Aktif", actual)
+            return ("TP", actual, stop)
+    return ("Aktif", actual, stop)
