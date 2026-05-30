@@ -137,9 +137,14 @@ class OkxInstruments:
                           f"notional ${notional:.0f} > tavan ${max_notional:.0f} "
                           f"(SL %{sl_pct*100:.2f} çok dar)")
         if target_margin > 0:
-            # Hedef margin: kaldıracı notional'a göre seç ki her işlem ~target_margin
-            # teminat tutsun → 1K bakiyeye çok pozisyon. Paritenin max'ıyla sınırlı.
+            # MARGIN CAP modu: her işlem ~target_margin teminat tutsun. Kaldıracı
+            # notional'a göre seç (parite max'ıyla sınırlı). Max kaldıraç YETMEZSE
+            # (dar stop → dev notional), notional'ı KÜÇÜLT ki margin=cap olsun —
+            # bu riski $20'nin altına indirir ama margin sabit kalır (kullanıcı kararı).
             lever = int(min(max(1, round(notional / target_margin)), inst.max_lever))
+            max_notional_for_cap = target_margin * lever
+            if notional > max_notional_for_cap:
+                notional = max_notional_for_cap   # risk düşer, margin = cap
         elif fixed_leverage > 0:
             # Sabit kaldıraç (paritenin max'ıyla sınırlı)
             lever = int(min(fixed_leverage, inst.max_lever))

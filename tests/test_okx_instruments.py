@@ -48,14 +48,20 @@ def test_target_margin():
     assert abs(s.notional_usd - 740.74) < 1  # notional/risk değişmedi
 
 
-def test_target_margin_capped_at_max_lever():
-    """Çok dar stop → hedef margin için gereken kaldıraç parite max'ını aşar → max."""
+def test_target_margin_cap_shrinks_notional():
+    """MARGIN CAP: dar stop → max kaldıraç yetmez → notional küçülür, margin=cap.
+    Risk $20'nin altına iner ama margin sabit (kullanıcı kararı B)."""
     inst = Instrument("SOL-USDT-SWAP", 1.0, 50, 0.01, 0.01, 0.01)
     oi = _inst_with(inst)
-    # SL %0.4 → notional 5000, hedef 30 → lever 166 gerekir ama max 50 → margin 100
+    # SL %0.4 → ham notional 5000, hedef margin 30 → lever 50 (max), 30×50=1500
+    # → notional 1500'e kısılır, margin = 1500/50 = 30 (cap tutar)
     s = oi.size_for("SOLUSDT", 180, 179.28, 180, risk_usd=20, equity=1000,
                     target_margin=30)
-    assert s.leverage == 50                  # paritenin max'ı (166 değil)
+    assert s.leverage == 50
+    assert abs(s.notional_usd - 1500) < 1    # notional küçüldü (5000 değil)
+    assert abs(s.margin_usd - 30) < 1        # margin tam cap'te
+    # gerçek risk = notional × SL% = 1500 × 0.004 = $6 (< $20, beklenen)
+    assert abs(s.notional_usd * 0.004 - 6) < 0.5
 
 
 def test_sizing_conservative_mode():
