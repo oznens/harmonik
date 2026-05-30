@@ -64,9 +64,11 @@ class OkxDemoEngine:
                  risk_per_trade: float = RISK_PER_TRADE_USD,
                  initial_equity: float = INITIAL_EQUITY_USD,
                  max_lever: int = MAX_USER_LEVER,
-                 pamonic: bool = False) -> None:
+                 pamonic: bool = False, max_open: int = 0) -> None:
         """pamonic=True: PaMonic modu — OB yoksa pas geç (enforce), OB varsa
-        stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef)."""
+        stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef).
+        max_open: aynı anda max açık pozisyon (0=sınırsız) — margin tükenmesini
+        (51008) önler."""
         self.store = store
         self.client = client
         self.instruments = instruments
@@ -74,6 +76,7 @@ class OkxDemoEngine:
         self.initial_equity = initial_equity
         self.max_lever = max_lever
         self.pamonic = pamonic
+        self.max_open = max_open
         self._lock = threading.RLock()
         self._migrate()
 
@@ -143,6 +146,13 @@ class OkxDemoEngine:
             if busy is not None:
                 log.info("OKX SKIP: %s zaten açık pozisyonda (parite başı tek)", setup.symbol)
                 return None
+            # Max açık pozisyon sınırı (margin tükenmesini önler)
+            if self.max_open > 0:
+                open_n = self.store._conn.execute(
+                    "SELECT COUNT(*) FROM okx_trades WHERE closed_at IS NULL").fetchone()[0]
+                if open_n >= self.max_open:
+                    log.info("OKX SKIP: max açık pozisyon (%d) doldu", self.max_open)
+                    return None
 
             # PaMonic modu: OB seviyeleri (dar stop + yapısal TP). OB yoksa pas geç.
             if self.pamonic:
@@ -154,6 +164,18 @@ class OkxDemoEngine:
                 stop_level, tp_level = ob_stop, ob_tp
             else:
                 stop_level, tp_level = setup.stop, setup.tp1
+
+            # OKX kuralı (51049): bull → SL<entry<TP, bear → TP<entry<SL. Yanlış
+            # taraftaysa (PaMonic dar stop bazen ters çıkabilir) → emir atma, atla.
+            e = setup.entry
+            if setup.direction == "bull":
+                valid = stop_level < e < tp_level
+            else:
+                valid = tp_level < e < stop_level
+            if not valid:
+                log.info("OKX SKIP: %s SL/TP yanlış tarafta (entry=%.6g SL=%.6g TP=%.6g %s)",
+                         setup.symbol, e, stop_level, tp_level, setup.direction)
+                return None
 
             equity = self._equity()
             sizing = self.instruments.size_for(

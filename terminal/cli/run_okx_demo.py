@@ -135,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sync-seconds", type=int, default=30)
     ap.add_argument("--risk", type=float, default=20.0)
     ap.add_argument("--max-lever", type=int, default=50)
+    ap.add_argument("--max-open", type=int, default=0,
+                    help="Aynı anda max açık pozisyon (0=sınırsız) — demo margin "
+                         "tükenmesini (51008) önler. Örn 20.")
     ap.add_argument("--pamonic", action="store_true",
                     help="PaMonic modu: OB yoksa pas geç (enforce), OB varsa dar "
                          "stop (OB arkası) + yapısal TP. OB filtreli A/B testi.")
@@ -167,9 +170,22 @@ def main(argv: list[str] | None = None) -> int:
     Store().close()  # şema
     store = Store()
     instruments = OkxInstruments()
+
+    # OKX'te SWAP olmayan pariteleri ele (MEXC combos'unda olup OKX'te olmayanlar
+    # 51001 verir + boş worker RAM yer). Başta tek instruments çağrısıyla filtrele.
+    before = len(combos)
+    combos = [(s, iv) for s, iv in combos if instruments.get(s) is not None]
+    skipped = before - len(combos)
+    if skipped:
+        log.info("OKX'te olmayan %d kombinasyon elendi (%d → %d)",
+                 skipped, before, len(combos))
+    if not combos:
+        print("HATA: OKX'te işlem gören parite kalmadı.", file=sys.stderr)
+        return 1
+
     engine = OkxDemoEngine(store, trade_client, instruments,
                            risk_per_trade=args.risk, max_lever=args.max_lever,
-                           pamonic=args.pamonic)
+                           pamonic=args.pamonic, max_open=args.max_open)
 
     log.info("OKX hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s",
              len(combos), args.poll_seconds, args.sync_seconds, args.pamonic)

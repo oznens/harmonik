@@ -13,13 +13,17 @@ Environment=PYTHONUNBUFFERED=1
 Environment=OKX_API_KEY=DOLDUR
 Environment=OKX_SECRET=DOLDUR
 Environment=OKX_PASSPHRASE=DOLDUR
+# NOT: combos_okx.txt = KÜÇÜK liste (top ~20 parite × 2-3 TF). 2GB RAM'de paper
+# (600w) + OKX birlikte çalışsın diye OKX küçük tutulur. PaMonic enforce zaten
+# az işlem açar → küçük kapsam yeterli. --max-open: demo margin koruması.
 ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_demo \
-    --combos-file config/tracked_combos.txt \
+    --combos-file config/combos_okx.txt \
     --poll-seconds 60 \
     --stagger-ms 300 \
     --sync-seconds 30 \
     --risk 20 \
     --max-lever 50 \
+    --max-open 15 \
     --pamonic \
     --log-level INFO
 Restart=on-failure
