@@ -106,7 +106,8 @@ class OkxInstruments:
                  risk_usd: float, equity: float,
                  max_user_lever: int = 100,
                  aggressive_leverage: bool = True,
-                 fixed_leverage: int = 0) -> Sizing | None:
+                 fixed_leverage: int = 0,
+                 max_notional: float = 0.0) -> Sizing | None:
         """$risk + kaldıraç → OKX kontrat adedi.
 
         risk = $risk_usd (SL'e değerse kaybedilecek). SL mesafesi %p.
@@ -127,6 +128,12 @@ class OkxInstruments:
         if sl_pct <= 0:
             return Sizing(0, 1, 0, 0, False, "SL mesafesi 0")
         notional = risk_usd / sl_pct
+        # Notional tavanı: dar stop (PaMonic OB) notional'ı şişirir → margin
+        # tüketir/51008. Tavanı aşan setup'ı atla (çok dar stop = riskli/likidite).
+        if max_notional > 0 and notional > max_notional:
+            return Sizing(0, 1, round(notional, 2), 0, False,
+                          f"notional ${notional:.0f} > tavan ${max_notional:.0f} "
+                          f"(SL %{sl_pct*100:.2f} çok dar)")
         if fixed_leverage > 0:
             # Sabit kaldıraç (kullanıcı isteği: hep 20x) — paritenin max'ıyla sınırlı
             lever = int(min(fixed_leverage, inst.max_lever))

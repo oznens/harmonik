@@ -23,6 +23,7 @@ ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_de
     --sync-seconds 30 \
     --risk 20 \
     --leverage 20 \
+    --max-notional 3000 \
     --max-open 30 \
     --pamonic \
     --log-level INFO

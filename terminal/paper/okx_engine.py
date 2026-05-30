@@ -65,7 +65,7 @@ class OkxDemoEngine:
                  initial_equity: float = INITIAL_EQUITY_USD,
                  max_lever: int = MAX_USER_LEVER,
                  pamonic: bool = False, max_open: int = 0,
-                 fixed_leverage: int = 0) -> None:
+                 fixed_leverage: int = 0, max_notional: float = 0.0) -> None:
         """pamonic=True: PaMonic modu — OB yoksa pas geç (enforce), OB varsa
         stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef).
         max_open: aynı anda max açık pozisyon (0=sınırsız) — margin tükenmesini
@@ -82,6 +82,7 @@ class OkxDemoEngine:
         self.pamonic = pamonic
         self.max_open = max_open
         self.fixed_leverage = fixed_leverage
+        self.max_notional = max_notional
         self._lock = threading.RLock()
         self._migrate()
 
@@ -186,7 +187,7 @@ class OkxDemoEngine:
             sizing = self.instruments.size_for(
                 setup.symbol, setup.entry, stop_level, setup.entry,
                 risk_usd=self.risk, equity=equity, max_user_lever=self.max_lever,
-                fixed_leverage=self.fixed_leverage)
+                fixed_leverage=self.fixed_leverage, max_notional=self.max_notional)
             if sizing is None or not sizing.ok:
                 log.info("OKX SKIP: %s boyut hesaplanamadı (%s)", setup.symbol,
                          sizing.reason if sizing else "instrument yok")
