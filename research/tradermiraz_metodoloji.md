@@ -30,6 +30,18 @@
    > "Teknik analiz para kazanmayı değil, parayı korumayı öğretir."
 4. **Psikoloji + trade günlüğü.** Disiplin, kendi hatasıyla yüzleşme.
 
+## 2.5) KRİTİK NÜANS — harmonik = mean-reversion (yön ELEME)
+"Trend önceliği" ilkesi YANLIŞ uygulanırsa "trend-tersi harmonikleri eleyelim"
+sapmasına yol açar. İKİ bağımsız kaynak bunun yanlış olduğunu söylüyor:
+- **Bu projenin backtest'i** (score.py notu): "harmonik mean-reversion setupları
+  HTF zıt'ta DAHA İYİ performe ediyor (uyumlu +11R vs zıt +18R)" → HTF Q'dan çıkarıldı.
+- **tradermiraz (#9, 9 May):** "Elenen setuplar genel olarak trend tersi… ancak
+  garip bir şekilde trend tersi işlemlerde de oldukça iyi sonuçlar görüyorum."
+
+**Sonuç:** Harmoniği YÖNÜNE göre eleme. "Trend"in rolü yön filtresi değil:
+(a) pozisyon **yönetimi**, (b) giriş **TEYİDİ/zamanlaması** (fraktal kırılımı).
+Harmoniğin doğası ters-tepki (PRZ'den dönüş) olduğu için trend-tersi normaldir.
+
 ## 3) ONUN "Price Action" tanımı (KRİTİK)
 ICT/SMC framework **DEĞİL**. Kavram sıklığı kanıtı: CHoCH=0, BOS=0,
 premium/discount=0, sweep=0, FVG=2. Onun PA yapı taşları:
@@ -80,10 +92,13 @@ filtresi** kazandırır.
 ## 7) PUSULA — sapma kontrol listesi
 Yeni bir özellik/karar bu ilkelere uymuyorsa, uygulamadan ÖNCE tartışılır:
 
-- [ ] **Trend önceliği korunuyor mu?** Trend tersi setup default işleme girmemeli
-      (Elenen). Trend yönüne göre yönetim esas.
-- [ ] **Harmonik tek başına mı çalışıyor?** Çıplak harmonik kanatır — mutlaka
-      PA/trend/fraktal filtresi olmalı. "Daha kaliteli setup > daha çok setup."
+- [ ] **Trend doğru rolde mi?** Trend YÖN filtresi DEĞİL — harmonik mean-reversion
+      olduğundan trend-tersi setup ELENMEZ (bkz. §2.5; proje + tradermiraz aynı
+      veriyi gördü). Trendin rolü: yönetim + giriş TEYİDİ (fraktal). "Trend-tersi
+      harmonikleri eleyelim" = SAPMA, uyar.
+- [ ] **Harmonik tek başına mı çalışıyor?** Çıplak harmonik kanatır — ama çözüm
+      yön elemek değil, **giriş teyidi/kalitesi** (fraktal kırılımı + PaMonic).
+      "Daha kaliteli setup > daha çok setup."
 - [ ] **SMC/ICT aşırılığı var mı?** tradermiraz CHoCH/BOS/premium-discount
       kullanmıyor. Tek SMC öğesi = OB@D (PaMonic). ICT framework'üne sapma = uyarı.
 - [ ] **Risk/sermaye koruma merkezde mi?** rr1, kademeli (DCA), stop disiplini.
