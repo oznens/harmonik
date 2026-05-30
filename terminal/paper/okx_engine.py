@@ -236,19 +236,30 @@ class OkxDemoEngine:
         from terminal.data.okx_futures import _to_inst
         return _to_inst(symbol)
 
+    @staticmethod
+    def _calc_pnl(direction, entry_px, exit_px, notional) -> float:
+        """Kendi P&L hesabı: notional × yön × (exit-entry)/entry. Risk $20 niyetiyle
+        tutarlı (SL'e değerse ~-$20). realizedPnl yanlış eşleşmesine karşı doğrulama."""
+        if not entry_px:
+            return 0.0
+        pct = (exit_px - entry_px) / entry_px
+        sign = 1.0 if direction == "bull" else -1.0
+        return notional * pct * sign
+
     def sync(self) -> int:
         """Açık OKX trade'leri OKX'ten senkronla.
 
-        1) Emir hâlâ live/canceled mı? canceled → kapat (state=canceled).
-        2) Pozisyon kapanmış mı? positions-history'deki realizedPnl ile kesinleştir.
-        Güncellenen kayıt sayısını döner.
+        1) Emir hâlâ live/canceled mı? canceled → kapat.
+        2) Pozisyon kapanmış mı? P&L'i positions-history realizedPnl ile (posId/
+           clOrdId benzersiz eşleştirme); o bulunamazsa kendi entry/exit'ten hesapla.
         """
         with self._lock:
-            # Önce kapanmış pozisyon geçmişini bir kez çek (realizedPnl kaynağı)
+            # positions-history: instId değil clOrdId/posId bazlı (aynı parite çok
+            # kez açılıp kapandığında karışmasın). closeOrdId/last fill eşleştir.
             try:
-                hist = {h.get("instId"): h for h in self.client.positions_history()}
+                hist_list = self.client.positions_history()
             except OkxAuthError:
-                hist = {}
+                hist_list = []
             try:
                 open_pos = {p.get("instId") for p in self.client.positions()
                             if float(p.get("pos") or 0) != 0}
@@ -256,11 +267,13 @@ class OkxDemoEngine:
                 open_pos = set()
 
             rows = self.store._conn.execute(
-                "SELECT setup_id, symbol, ord_id, state FROM okx_trades "
-                "WHERE closed_at IS NULL").fetchall()
+                "SELECT setup_id, symbol, ord_id, cl_ord_id, state, direction, "
+                "entry_px, stop_px, tp_px, sz, notional_usd "
+                "FROM okx_trades WHERE closed_at IS NULL").fetchall()
             updated = 0
             now = int(time.time() * 1000)
-            for sid, symbol, ord_id, state in rows:
+            for (sid, symbol, ord_id, cl_ord_id, state, direction,
+                 entry_px, stop_px, tp_px, sz, notional) in rows:
                 inst = self._inst_id(symbol)
                 # Emir durumu
                 try:
@@ -277,11 +290,32 @@ class OkxDemoEngine:
                 if ostate == "filled" and state == "live":
                     self.store._conn.execute(
                         "UPDATE okx_trades SET state='filled' WHERE setup_id=?", (sid,))
-                # Pozisyon kapandı mı: artık açık değil + geçmişte realizedPnl var
-                if inst not in open_pos and inst in hist:
-                    h = hist[inst]
-                    pnl = float(h.get("realizedPnl") or 0)
-                    exit_px = float(h.get("closeAvgPx") or 0) or None
+                # Pozisyon kapandı mı: artık açık değil + emir filled olmuştu
+                if inst not in open_pos and ostate in ("filled", ""):
+                    # Bu emre ait history kaydı: instId eşleşen (clOrdId varsa onunla
+                    # önceliklendir). realizedPnl'i KENDİ hesabımız doğrular → yanlış
+                    # eşleşme (aynı parite çok kapanış) zararı engellenir.
+                    cands = [x for x in hist_list if x.get("instId") == inst]
+                    h = next((x for x in cands if x.get("clOrdId") == cl_ord_id), None) \
+                        or (cands[-1] if cands else None)
+                    pnl = None
+                    exit_px = None
+                    if h is not None:
+                        # realizedPnl o paritenin bu kapanışına ait — ama emin değilsek
+                        # kendi hesabımızla DOĞRULA (sapma büyükse kendi hesabı kullan)
+                        rp = float(h.get("realizedPnl") or 0)
+                        exit_px = float(h.get("closeAvgPx") or 0) or None
+                        if exit_px:
+                            calc = self._calc_pnl(direction, entry_px, exit_px, notional)
+                            # realizedPnl ile kendi hesabımız uyuşuyorsa onu kullan,
+                            # büyük sapma varsa (yanlış eşleşme) kendi hesabımızı al
+                            pnl = rp if abs(rp - calc) < abs(calc) * 0.5 + 1 else calc
+                        else:
+                            pnl = rp
+                    if pnl is None:
+                        # history yok → entry/exit bilinmiyor; risk tabanlı tahmin yok,
+                        # ZI (sonuçsuz) bırak, bir sonraki sync'te tekrar dene
+                        continue
                     self.store._conn.execute(
                         "UPDATE okx_trades SET state='closed', pnl_usd=?, exit_px=?, "
                         "closed_at=? WHERE setup_id=? AND closed_at IS NULL",

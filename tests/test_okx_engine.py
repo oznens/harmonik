@@ -100,17 +100,43 @@ def test_sync_closes_on_history_pnl(store):
     fake = _FakeOkx()
     eng = OkxDemoEngine(store, fake, _fake_instruments())
     t = eng.open_trade(s, sid, s.detected_at)
-    # OKX: emir doldu + pozisyon geçmişte +12.5 realizedPnl ile kapandı
+    # OKX: emir doldu + pozisyon kapandı. realizedPnl, kendi entry/exit hesabıyla
+    # TUTARLI olmalı (yanlış eşleşme koruması). exit = entry'nin biraz üstü (TP).
     fake.orders[t.ord_id]["state"] = "filled"
     fake.positions = lambda: []
+    exit_px = round(t.entry_px * 1.01, 6)   # %1 TP → bull kazanç
+    expect = eng._calc_pnl(t.direction, t.entry_px, exit_px, t.notional_usd)
     fake.positions_history = lambda: [{"instId": "TEST-USDT-SWAP",
-                                       "realizedPnl": "12.5", "closeAvgPx": "111"}]
+                                       "clOrdId": t.cl_ord_id,
+                                       "realizedPnl": str(round(expect, 4)),
+                                       "closeAvgPx": str(exit_px)}]
     n = eng.sync()
     assert n == 1
     row = store._conn.execute(
         "SELECT state, pnl_usd FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()
-    assert row[0] == "closed" and abs(row[1] - 12.5) < 1e-6
-    assert eng.open_positions() == []
+    assert row[0] == "closed"
+    assert abs(row[1] - expect) < 1.0        # realizedPnl kendi hesapla uyumlu
+
+
+def test_sync_rejects_wrong_pnl(store):
+    """realizedPnl kendi hesaptan ÇOK saparsa (yanlış eşleşme) kendi hesabı kullanılır."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)
+    fake.orders[t.ord_id]["state"] = "filled"
+    fake.positions = lambda: []
+    exit_px = round(t.entry_px * 0.99, 6)   # %1 düşüş → bull SL, ~-risk
+    calc = eng._calc_pnl(t.direction, t.entry_px, exit_px, t.notional_usd)
+    # OKX yanlış olarak -601 raporluyor (başka pozisyonun zararı eşleşmiş)
+    fake.positions_history = lambda: [{"instId": "TEST-USDT-SWAP",
+                                       "realizedPnl": "-601",
+                                       "closeAvgPx": str(exit_px)}]
+    eng.sync()
+    pnl = store._conn.execute(
+        "SELECT pnl_usd FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()[0]
+    # -601'i REDDEDİP kendi hesabını (calc, ~-risk) kullanmalı
+    assert abs(pnl - calc) < 1.0 and pnl > -100
 
 
 def test_summary(store):
