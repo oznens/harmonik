@@ -108,6 +108,10 @@ STYLE = """
   .g { color:#4caf50; } .r { color:#ef5350; } .d { color:#888; }
   .empty { padding:18px; text-align:center; color:#888; }
   .foot { margin-top:16px; color:#666; font-size:11px; text-align:center; }
+  table.sortable th { cursor:pointer; user-select:none; }
+  table.sortable th:hover { color:#cdd0d6; }
+  table.sortable th.asc::after { content:" \\2191"; color:#42a5f5; font-size:10px; }
+  table.sortable th.desc::after { content:" \\2193"; color:#42a5f5; font-size:10px; }
 """
 
 
@@ -259,7 +263,7 @@ def _pattern_table(rows: list) -> str:
     """Harmonik bazında performans: TP / SL / WR / P&L + ortalama skorlar."""
     if not rows:
         return '<div class="empty">Henüz kapanan kararlı işlem yok.</div>'
-    head = ("<table><thead><tr>"
+    head = ('<table class="sortable"><thead><tr>'
             '<th class="l">Pattern</th><th>TP</th><th>SL</th><th>WR</th>'
             "<th>P&amp;L</th><th>Ø Q</th><th>Ø Conf</th>"
             "</tr></thead><tbody>")
@@ -384,8 +388,53 @@ def render_dashboard(db_path, refresh: int) -> str:
   <div class="tablewrap">{open_table}</div>
   <div class="sec dim">📋 Son Kapanan Trade'ler ({len(closed_raw)})</div>
   <div class="tablewrap">{closed_table}</div>
-  <div class="foot">Güncelleme: {now} · {refresh} sn'de bir otomatik yenilenir</div>
-</div></body></html>"""
+  <div class="foot">Güncelleme: {now} · {refresh} sn'de bir otomatik yenilenir · başlıklara tıklayıp sırala</div>
+</div>
+<script>
+(function() {{
+  function cellVal(td) {{
+    var d = td.getAttribute('data-sort');
+    if (d !== null) return parseFloat(d) || 0;
+    var t = (td.textContent || '').trim().replace('%','').replace('$','').replace(/[+x]/g,'');
+    var n = parseFloat(t.replace(',',''));
+    return isNaN(n) ? t.toLowerCase() : n;
+  }}
+  function sortTable(tbl, col, asc) {{
+    var tb = tbl.tBodies[0];
+    var rows = Array.prototype.slice.call(tb.rows);
+    rows.sort(function(a, b) {{
+      var x = cellVal(a.cells[col]), y = cellVal(b.cells[col]);
+      if (x < y) return asc ? -1 : 1;
+      if (x > y) return asc ? 1 : -1;
+      return 0;
+    }});
+    rows.forEach(function(r) {{ tb.appendChild(r); }});
+  }}
+  document.querySelectorAll('table.sortable').forEach(function(tbl, ti) {{
+    var ths = tbl.tHead.rows[0].cells;
+    Array.prototype.forEach.call(ths, function(th, ci) {{
+      th.addEventListener('click', function() {{
+        var key = 'sort_' + ti + '_' + ci;
+        var asc = localStorage.getItem('sortdir_' + ti) === key ? false : true;
+        Array.prototype.forEach.call(ths, function(h) {{ h.classList.remove('asc','desc'); }});
+        th.classList.add(asc ? 'asc' : 'desc');
+        sortTable(tbl, ci, asc);
+        localStorage.setItem('sortcol_' + ti, ci);
+        localStorage.setItem('sortasc_' + ti, asc ? '1' : '0');
+        localStorage.setItem('sortdir_' + ti, asc ? key : '');
+      }});
+    }});
+    // Auto-refresh sonrası kaydedilmiş sırayı geri uygula
+    var sc = localStorage.getItem('sortcol_' + ti);
+    if (sc !== null) {{
+      var ci = parseInt(sc, 10);
+      var asc = localStorage.getItem('sortasc_' + ti) === '1';
+      if (ths[ci]) {{ ths[ci].classList.add(asc ? 'asc' : 'desc'); sortTable(tbl, ci, asc); }}
+    }}
+  }});
+}})();
+</script>
+</body></html>"""
 
 
 def _dir(direction: str) -> tuple[str, str]:
@@ -414,7 +463,7 @@ def _sym_link(setup_id, symbol) -> str:
 def _open_table(rows: list) -> str:
     if not rows:
         return '<div class="empty">Açık pozisyon yok.</div>'
-    head = ("<table><thead><tr>"
+    head = ('<table class="sortable"><thead><tr>'
             '<th class="l">Parite</th><th>TF</th><th class="l">Pattern</th><th>Yön</th>'
             "<th>Entry</th><th>Stop</th><th>Hedef</th><th>R:R</th><th>Q</th><th>Conf</th>"
             "<th>Pozisyon</th><th>Lev</th><th>Açıldı</th><th>Yaş</th>"
@@ -433,8 +482,8 @@ def _open_table(rows: list) -> str:
             f'<td class="{_rr_cls(rr)}">{rr:.2f}</td>'
             f'{_score_cell(r["q_score"])}{_score_cell(r["confluence_score"])}'
             f'<td>${r["position_usd"]:.0f}</td><td>{r["leverage"]:.0f}x</td>'
-            f'<td class="d">{_fmt_ts(r["opened_at"])}</td>'
-            f'<td class="d">{_fmt_age(r["opened_at"])}</td></tr>'
+            f'<td class="d" data-sort="{r["opened_at"] or 0}">{_fmt_ts(r["opened_at"])}</td>'
+            f'<td class="d" data-sort="{r["opened_at"] or 0}">{_fmt_age(r["opened_at"])}</td></tr>'
         )
     return head + "".join(body) + "</tbody></table>"
 
@@ -442,7 +491,7 @@ def _open_table(rows: list) -> str:
 def _closed_table(rows: list) -> str:
     if not rows:
         return '<div class="empty">Henüz kapanan trade yok.</div>'
-    head = ("<table><thead><tr>"
+    head = ('<table class="sortable"><thead><tr>'
             '<th class="l">Parite</th><th>TF</th><th class="l">Pattern</th><th>Yön</th>'
             "<th>Entry</th><th>R:R</th><th>Q</th><th>Conf</th><th>Exit</th><th>Sonuç</th><th>P&amp;L</th>"
             "<th>Lev</th><th>Kapandı</th>"
@@ -465,9 +514,9 @@ def _closed_table(rows: list) -> str:
             f'{_score_cell(r["q_score"])}{_score_cell(r["confluence_score"])}'
             f'<td>{_fmt_price(r["exit_price"])}</td>'
             f'<td class="{out_cls}">{_e(out)}</td>'
-            f'<td class="{pnl_cls}">{"+" if pnl >= 0 else ""}${pnl:.2f}</td>'
+            f'<td class="{pnl_cls}" data-sort="{pnl}">{"+" if pnl >= 0 else ""}${pnl:.2f}</td>'
             f'<td>{r["leverage"]:.0f}x</td>'
-            f'<td class="d">{_fmt_ts(r["closed_at"])}</td></tr>'
+            f'<td class="d" data-sort="{r["closed_at"] or 0}">{_fmt_ts(r["closed_at"])}</td></tr>'
         )
     return head + "".join(body) + "</tbody></table>"
 
