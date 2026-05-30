@@ -1,0 +1,25 @@
+[Unit]
+Description=harmonik OKX demo web dashboard (mobil, salt-okunur)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=harmonik
+WorkingDirectory=/home/harmonik/harmonik-okx
+Environment=PYTHONUNBUFFERED=1
+Environment=WEB_USER=admin
+Environment=WEB_PASS=DEGISTIR_BENI
+Environment=OKX_WEB_PORT=8090
+# Canlı demo equity için (opsiyonel — yoksa equity '—' gösterir):
+Environment=OKX_API_KEY=DOLDUR
+Environment=OKX_SECRET=DOLDUR
+Environment=OKX_PASSPHRASE=DOLDUR
+ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.web.okx_server --log-level INFO
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/harmonik/okx-web.log
+StandardError=append:/var/log/harmonik/okx-web.err
+
+[Install]
+WantedBy=multi-user.target
