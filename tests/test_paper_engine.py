@@ -1,10 +1,10 @@
-"""PaperEngine thread-safety + lifecycle senkron testleri.
+"""PaperEngine thread-safety + lifecycle senkron + slippage testleri.
 
-Bug: paylaşılan Store ana thread'de oluşturulup worker thread'lerinden
-çağrılınca SQLite `check_same_thread` hatası fırlatıyordu → canlı paper
-aç/kapa sessizce başarısız oluyordu. Burada cross-thread kullanımın artık
-çalıştığı ve lifecycle ile senkronizasyonun stale açık trade'leri kapattığı
-doğrulanır.
+Bug (orijinal): paylaşılan Store ana thread'de oluşturulup worker thread'lerinden
+çağrılınca SQLite `check_same_thread` hatası fırlatıyordu → canlı paper aç/kapa
+sessizce başarısız oluyordu. Burada cross-thread kullanımın çalıştığı, lifecycle
+senkronunun stale açık trade'leri kapattığı ve slippage modelinin doğru P&L
+ürettiği doğrulanır.
 """
 from __future__ import annotations
 
@@ -100,3 +100,42 @@ def test_sync_keeps_open_when_lifecycle_active(store: Store):
 
     assert pe.sync_closed_from_lifecycle() == []
     assert len(pe.open_positions()) == 1
+
+
+# ---- Slippage (gerçeğe yakınlık) ----
+
+def test_entry_slippage_bull_fills_worse(store: Store):
+    """bull girişte dolum ALEYHTE kayar (daha pahalı)."""
+    s, sid = _seed(store)  # gartley_bull → direction bull
+    pe = PaperEngine(store, entry_slippage_pct=0.0002, stop_slippage_pct=0.0)
+    trade = pe.open_trade(s, sid, s.detected_at)
+    assert trade.entry_price == pytest.approx(s.entry * 1.0002, rel=1e-9)
+
+
+def test_no_slippage_fills_exact(store: Store):
+    """Slippage 0 → eski davranış (tam entry)."""
+    s, sid = _seed(store)
+    pe = PaperEngine(store, entry_slippage_pct=0.0, stop_slippage_pct=0.0)
+    trade = pe.open_trade(s, sid, s.detected_at)
+    assert trade.entry_price == pytest.approx(s.entry, rel=1e-9)
+
+
+def test_stop_slippage_increases_loss(tmp_path):
+    """STOP market slippage → zarar slippage'siz duruma göre DAHA BÜYÜK."""
+    # Slippage'siz
+    s0 = Store(path=tmp_path / "a.db")
+    seed0, sid0 = _seed(s0)
+    pe0 = PaperEngine(s0, entry_slippage_pct=0.0, stop_slippage_pct=0.0)
+    pe0.open_trade(seed0, sid0, seed0.detected_at)
+    loss0 = pe0.close_trade(sid0, "STOP", seed0.stop, seed0.detected_at + 1).pnl_usd
+    s0.close()
+
+    # Slippage'li (sadece stop)
+    s1 = Store(path=tmp_path / "b.db")
+    seed1, sid1 = _seed(s1)
+    pe1 = PaperEngine(s1, entry_slippage_pct=0.0, stop_slippage_pct=0.0005)
+    pe1.open_trade(seed1, sid1, seed1.detected_at)
+    loss1 = pe1.close_trade(sid1, "STOP", seed1.stop, seed1.detected_at + 1).pnl_usd
+    s1.close()
+
+    assert loss1 < loss0   # slippage'li zarar daha negatif

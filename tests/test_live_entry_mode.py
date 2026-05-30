@@ -55,7 +55,9 @@ def test_limit_mode_opens_at_entry_price(store: Store):
     assert sid not in w._pending_entries          # pending YOK — anında açıldı
     opens = pe.open_positions()
     assert len(opens) == 1
-    assert opens[0]["entry"] == s.entry            # dolum = TAM entry (limit, slippage yok)
+    # Limit modda fiyat entry'ye değince açılır; dolum entry + giriş slippage'i
+    # (bull → hafif pahalı). Slippage default %0.02 açık.
+    assert opens[0]["entry"] == pytest.approx(s.entry * 1.0002, rel=1e-9)
 
 
 def test_market_mode_defers_to_next_bar(store: Store):
