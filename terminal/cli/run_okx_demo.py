@@ -146,8 +146,12 @@ def main(argv: list[str] | None = None) -> int:
                          "her işlem ~bu kadar teminat tutsun → 1K bakiyeye çok poz. "
                          "Risk yine $20 sabit. 0=kapalı (leverage/agresif kullan).")
     ap.add_argument("--max-open", type=int, default=0,
-                    help="Aynı anda max açık pozisyon (0=sınırsız) — demo margin "
-                         "tükenmesini (51008) önler. Örn 20.")
+                    help="Aynı anda max açık pozisyon (0=sınırsız). 0 ise sınır "
+                         "boş USDT'dir: her açılışta canlı availBal kapısı → bakiye "
+                         "oldukça açar, bitince durur (51008 önlenir).")
+    ap.add_argument("--min-free", type=float, default=0.0,
+                    help="İşlem sonrası boşta tutulacak min USDT tamponu (0=tümünü "
+                         "kullan). Boş USDT < margin+tampon ise açma.")
     ap.add_argument("--pamonic", action="store_true",
                     help="PaMonic modu: OB yoksa pas geç (enforce), OB varsa dar "
                          "stop (OB arkası) + yapısal TP. OB filtreli A/B testi.")
@@ -197,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
                            risk_per_trade=args.risk, max_lever=args.max_lever,
                            pamonic=args.pamonic, max_open=args.max_open,
                            fixed_leverage=args.leverage, max_notional=args.max_notional,
-                           target_margin=args.target_margin)
+                           target_margin=args.target_margin, min_free_usdt=args.min_free)
 
     log.info("OKX hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s",
              len(combos), args.poll_seconds, args.sync_seconds, args.pamonic)

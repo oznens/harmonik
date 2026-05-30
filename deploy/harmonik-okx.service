@@ -15,9 +15,10 @@ Environment=OKX_SECRET=DOLDUR
 Environment=OKX_PASSPHRASE=DOLDUR
 # NOT: tracked_combos.txt = OKX top100 marketcap × 6TF (gen_top_combos
 # --source okx-marketcap). Ayrı 1GB VPS'te tek servis → 600 worker sığar
-# (LimitNOFILE şart). max-lever 100: agresif (paritenin max'ı) → margin MİN, çok
-# target-margin 30: her işlem ~$30 teminat (kaldıraç notional'a göre) → 1K'ya
-# çok poz. max-notional 6000: aşırı dar stopları ele. paper-stili (pamonic YOK).
+# (LimitNOFILE şart). target-margin 30: her işlem ~$30 teminat (kaldıraç
+# notional'a göre). max-notional 6000: aşırı dar stopları ele. paper-stili
+# (pamonic YOK). max-open YOK: poz sayısı boş USDT'ye (canlı availBal) göre
+# doğal sınırlanır — bakiye oldukça açar, bitince durur (51008 önlenir).
 ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_demo \
     --combos-file config/tracked_combos.txt \
     --poll-seconds 60 \
@@ -26,7 +27,6 @@ ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_de
     --risk 20 \
     --target-margin 30 \
     --max-notional 6000 \
-    --max-open 25 \
     --log-level INFO
 Restart=on-failure
 RestartSec=10

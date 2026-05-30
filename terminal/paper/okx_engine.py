@@ -66,11 +66,14 @@ class OkxDemoEngine:
                  max_lever: int = MAX_USER_LEVER,
                  pamonic: bool = False, max_open: int = 0,
                  fixed_leverage: int = 0, max_notional: float = 0.0,
-                 target_margin: float = 0.0) -> None:
+                 target_margin: float = 0.0, min_free_usdt: float = 0.0) -> None:
         """pamonic=True: PaMonic modu — OB yoksa pas geç (enforce), OB varsa
         stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef).
         max_open: aynı anda max açık pozisyon (0=sınırsız) — margin tükenmesini
-        (51008) önler.
+        (51008) önler. 0 ise sınır YOK: pozisyon sayısı boş USDT'ye göre doğal
+        sınırlanır (her açılışta canlı availBal kapısı uygulanır).
+        min_free_usdt: işlem sonrası boşta kalması gereken min USDT tamponu (0=tümü
+        kullanılabilir, 'bakiye oldukça aç').
         fixed_leverage: sabit kaldıraç (>0). 0=agresif (paritenin max'ı). Kullanıcı
         sabit 20x isterse 20. Risk yine $20 SABİT (SL belirler), kaldıraç sadece
         kilitlenen teminatı belirler (cross margin)."""
@@ -85,6 +88,7 @@ class OkxDemoEngine:
         self.fixed_leverage = fixed_leverage
         self.max_notional = max_notional
         self.target_margin = target_margin
+        self.min_free_usdt = min_free_usdt
         self._lock = threading.RLock()
         self._migrate()
 
@@ -126,14 +130,39 @@ class OkxDemoEngine:
             )
         """)
 
+    def _balance_raw(self) -> dict:
+        """Ham OKX bakiye data[0]; hata olursa {}."""
+        try:
+            return self.client.balance()
+        except (OkxAuthError, ValueError, IndexError, KeyError):
+            return {}
+
+    def _equity_from(self, bal: dict) -> float:
+        """Bakiye dict'inden gerçek equity (totalEq); yoksa initial."""
+        try:
+            te = bal.get("totalEq") or (bal.get("details") or [{}])[0].get("cashBal")
+            return float(te) if te else self.initial_equity
+        except (ValueError, IndexError, KeyError, TypeError):
+            return self.initial_equity
+
+    def _free_usdt_from(self, bal: dict) -> float | None:
+        """Boş (kullanılabilir) USDT margin = availBal. None=okunamadı → kapı pas.
+
+        Cross margin'de availBal yeni pozisyona ayrılabilecek serbest teminattır;
+        emir verilince (limit dahil) anında düşer → bir sonraki açılış güncel görür.
+        """
+        for d in bal.get("details", []):
+            if d.get("ccy") == "USDT":
+                av = d.get("availBal") or d.get("availEq") or d.get("cashBal")
+                try:
+                    return float(av) if av else None
+                except (ValueError, TypeError):
+                    return None
+        return None
+
     def _equity(self) -> float:
         """Demo hesap gerçek equity'si (OKX'ten); hata olursa initial."""
-        try:
-            bal = self.client.balance()
-            te = bal.get("totalEq") or bal.get("details", [{}])[0].get("cashBal")
-            return float(te) if te else self.initial_equity
-        except (OkxAuthError, ValueError, IndexError, KeyError):
-            return self.initial_equity
+        return self._equity_from(self._balance_raw())
 
     def open_trade(self, setup: Setup, setup_id: int, opened_at: int,
                    klines: list | None = None) -> OkxTrade | None:
@@ -197,7 +226,8 @@ class OkxDemoEngine:
                          setup.symbol, e, stop_level, tp_level, setup.direction)
                 return None
 
-            equity = self._equity()
+            bal = self._balance_raw()
+            equity = self._equity_from(bal)
             sizing = self.instruments.size_for(
                 setup.symbol, setup.entry, stop_level, setup.entry,
                 risk_usd=self.risk, equity=equity, max_user_lever=self.max_lever,
@@ -206,6 +236,17 @@ class OkxDemoEngine:
             if sizing is None or not sizing.ok:
                 log.info("OKX SKIP: %s boyut hesaplanamadı (%s)", setup.symbol,
                          sizing.reason if sizing else "instrument yok")
+                return None
+
+            # BAKİYE KAPISI: sabit max-open yerine gerçek boş USDT (availBal). Bu
+            # işlemin margin'i + tampon boş USDT'yi aşıyorsa açma → 51008 (yetersiz
+            # teminat) baştan önlenir, pozisyon sayısı bakiyeye göre doğal sınırlanır.
+            free = self._free_usdt_from(bal)
+            if free is not None and free < sizing.margin_usd + self.min_free_usdt:
+                log.info("OKX SKIP: boş USDT $%.0f < gereken $%.0f (margin $%.0f"
+                         "+tampon $%.0f) — %s bakiye yetmez",
+                         free, sizing.margin_usd + self.min_free_usdt,
+                         sizing.margin_usd, self.min_free_usdt, setup.symbol)
                 return None
 
             inst = self.instruments.get(setup.symbol)

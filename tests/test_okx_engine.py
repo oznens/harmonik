@@ -14,14 +14,18 @@ from tests.synthetic import gartley_bull, make_xabcd_klines
 
 class _FakeOkx:
     """OkxDemoClient yerine — emir/hesap çağrılarını taklit eder."""
-    def __init__(self):
+    def __init__(self, free_usdt=None):
         self.orders = {}
         self.next_id = 1000
         self._equity = 1000.0
+        self.free_usdt = free_usdt   # None → balance'ta USDT availBal yok (kapı inert)
         self.placed = []
 
     def balance(self, ccy="USDT"):
-        return {"totalEq": str(self._equity), "details": [{"cashBal": str(self._equity)}]}
+        details = [{"cashBal": str(self._equity)}]
+        if self.free_usdt is not None:
+            details.append({"ccy": "USDT", "availBal": str(self.free_usdt)})
+        return {"totalEq": str(self._equity), "details": details}
 
     def set_leverage(self, symbol, lever, td_mode="cross"):
         return {"lever": str(lever)}
@@ -95,6 +99,37 @@ def test_skips_if_okx_already_has_position(store):
     t = eng.open_trade(s, sid, s.detected_at)
     assert t is None                       # OKX gerçek kontrol → atladı
     assert len(fake.placed) == 0           # emir GİTMEDİ
+
+
+def test_skips_when_free_usdt_below_margin(store):
+    """BAKİYE KAPISI: boş USDT işlemin margin'ini karşılamıyorsa açma (51008 önle)."""
+    s, sid = _setup(store)
+    fake = _FakeOkx(free_usdt=0.5)        # neredeyse boş hesap
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)
+    assert t is None                       # boş USDT < margin → atladı
+    assert len(fake.placed) == 0           # emir GİTMEDİ
+
+
+def test_opens_when_free_usdt_sufficient(store):
+    """Boş USDT margin'i karşılıyorsa açar (sabit max-open yok, sınır bakiye)."""
+    s, sid = _setup(store)
+    fake = _FakeOkx(free_usdt=100_000)     # bol bakiye
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)
+    assert t is not None
+    assert len(fake.placed) == 1
+
+
+def test_min_free_buffer_reserves_balance(store):
+    """min_free_usdt tamponu: boş USDT margin'i karşılasa da tampon altında kalırsa açma."""
+    s, sid = _setup(store)
+    # margin küçük (~birkaç $) ama free=margin+5 < margin+min_free(1000) → atla
+    fake = _FakeOkx(free_usdt=50)
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), min_free_usdt=1000)
+    t = eng.open_trade(s, sid, s.detected_at)
+    assert t is None
+    assert len(fake.placed) == 0
 
 
 def test_one_position_per_symbol(store):
