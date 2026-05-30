@@ -158,6 +158,29 @@ rm /tmp/analiz.db
 **Pusula notu:** Doğrudan ENFORCE (PaMonic yoksa girme) küçük örneklemde riskli;
 işlem sayısını %40'a düşürür. tradermiraz'ın yolu da "önce gözlemle". Shadow > Enforce.
 
+### 9.2 OB hangi TF'de aranmalı? → AYNI TF (çözüldü ✅)
+**Soru:** 15m harmonik için OB'yi hangi TF'de aramalı — aynı/alt/üst?
+
+**Tweet ipucu (18 Nis):** "Ethereum **2H zaman diliminde** … Harmonik + Price
+Action **uyumlu** 4 yapı" → harmonik hangi TF'deyse OB de AYNI TF'de. Ayrı bir
+TF'den bahsetmiyor.
+
+**Gerçek-veri testi** (`--compare`, 41 işlem, 2026-05-30):
+| OB-TF | PaMonic WR | İşlem | PaMonic P&L |
+|---|---|---|---|
+| **Aynı TF** 🏆 | **68.8%** | 16 | **+70.53** |
+| Alt TF (LTF) | 50.0% | 4 | −4.40 |
+| Üst TF (HTF) | 61.1% | 18 | +22.57 (ayırt edici DEĞİL: OB'siz de %60.9) |
+
+**Sonuç:** AYNI TF açık ara kazanan. LTF işe yaramıyor (o TF mumları DB'de az,
+gürültülü). HTF nötr (OB'li/OB'siz fark yok). → Mevcut kod zaten "aynı TF"
+kullanıyor, **değişiklik gerekmez.** `pamonic_gecmis --compare` ile tekrar
+ölçülebilir.
+
+**Bonus (41 işlem, ilk 40'a göre güçlendi):** PaMonic YOK işlemler artık ~sıfır
+kâr DEĞİL, **zarar** ediyor (−26.94$). PaMonic VAR: +70.53$. Yani örneklem
+büyüdükçe OB'nin ayırt ediciliği ARTIYOR — "200'de bak" kararını destekliyor.
+
 ---
 
 *Bu döküm yaşayan bir belgedir; yeni tweet/analiz geldikçe güncellenir.*
