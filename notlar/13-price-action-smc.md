@@ -137,3 +137,29 @@ python -m terminal.cli.run_live_multi --symbols BTCUSDT --intervals 60m,4h \
 
 > Hepsi `confluence` kalıbındadır: önce backtest `format_smc_sweep` ile ölç,
 > edge görülen eşikte canlıda aç.
+
+---
+
+## Giriş denetimi — 3 kontrol noktası (`pa_check`)
+
+Bot bir işlem açtığında girişin "doğru yer / doğru zaman / doğru stop" olup
+olmadığını mekanik olarak raporlar (`quality/pa_check.py` → `pa_checklist()`):
+
+| # | Kontrol | Kural |
+|---|---------|-------|
+| 1 | **Doğru yer** | D, geçmiş bir OB/FVG bölgesinin içinde mi (`compute_smc`). |
+| 2 | **Doğru zaman** | Girişten önce ALT TF'de CHoCH onaylandı mı (`check_choch`). |
+| 3 | **Doğru stop** | Stop, PA yapısının (sweep iğnesi / OB kutusu / FVG tabanı) arkasında mı — yoksa harmonik/sabit-% mi (`pa_stop`). |
+
+```bash
+python -m terminal.cli.pa_check --setup-id 123          # DB'deki setup (HTF+LTF DB'den)
+python -m terminal.cli.pa_check --symbol BTCUSDT --interval 60m --last 5   # canlı
+```
+
+Çıktı her madde için ✅ EVET / ❌ HAYIR / ⚠️ ? (LTF verisi yoksa) verir.
+
+> **Bilinen açık (#3):** Mevcut canlı/backtest girişi `setup.stop`'u **harmonik**
+> (XA-tabanlı) + `MIN_SL_PCT=%0.4` taban ile koyar — PA yapısına göre DEĞİL.
+> `pa_stop()` PA stop'un nerede olması gerektiğini hesaplar; denetim mevcut stop
+> ile PA stop arasındaki sapmayı gösterir. Girişi gerçekten PA stop'a bağlamak
+> (opt-in `--pa-stop`) sıradaki adım.

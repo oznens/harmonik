@@ -35,6 +35,8 @@ class SmcResult:
     order_block: bool
     fvg: bool
     sweep: bool
+    ob_zone: dict | None = None   # D'yi içeren eşleşen OB kutusu (varsa)
+    fvg_zone: dict | None = None  # D'yi içeren eşleşen FVG (varsa)
 
 
 def compute_smc(
@@ -62,23 +64,19 @@ def compute_smc(
     d_price = d_pivot.price
     left = klines[: d_idx + 1]  # D ve öncesi (zonlar D'den önce oluşmuş olmalı)
 
-    obs = find_order_blocks(left, lookback=ob_lookback)
-    ob_hit = any(
-        z["type"] == side and z["index"] < d_idx
-        and z["bottom"] <= d_price <= z["top"]
-        for z in obs
-    )
-    fvgs = find_fair_value_gaps(left, lookback=fvg_lookback)
-    fvg_hit = any(
-        z["type"] == side and z["index"] < d_idx
-        and z["bottom"] <= d_price <= z["top"]
-        for z in fvgs
-    )
+    def _match(zones: list[dict]) -> dict | None:
+        # D'yi içeren, yön-uyumlu, D'den önce oluşmuş bölge (en yakın = en güncel).
+        hits = [z for z in zones if z["type"] == side and z["index"] < d_idx
+                and z["bottom"] <= d_price <= z["top"]]
+        return hits[-1] if hits else None
+
+    ob_zone = _match(find_order_blocks(left, lookback=ob_lookback))
+    fvg_zone = _match(find_fair_value_gaps(left, lookback=fvg_lookback))
     sweep_hit = check_liquidity_sweep(klines, d_idx, side, lookback=sweep_lookback)
 
-    if ob_hit:
+    if ob_zone is not None:
         components["order_block"] = OB_PTS
-    if fvg_hit:
+    if fvg_zone is not None:
         components["fvg"] = FVG_PTS
     if sweep_hit:
         components["sweep"] = SWEEP_PTS
@@ -87,5 +85,6 @@ def compute_smc(
     return SmcResult(
         score=max(0, min(100, score)),
         components={k: round(v, 1) for k, v in components.items()},
-        order_block=ob_hit, fvg=fvg_hit, sweep=sweep_hit,
+        order_block=ob_zone is not None, fvg=fvg_zone is not None, sweep=sweep_hit,
+        ob_zone=ob_zone, fvg_zone=fvg_zone,
     )
