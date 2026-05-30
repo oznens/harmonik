@@ -1,0 +1,66 @@
+"""OKX instrument sizing testleri — kontrat/kaldıraç hesabı (ağsız, mock instrument)."""
+from __future__ import annotations
+
+from terminal.data.okx_instruments import Instrument, OkxInstruments, Sizing
+
+
+def _inst_with(symbol_inst: Instrument) -> OkxInstruments:
+    """Ağ açmadan, cache'i elle doldurulmuş OkxInstruments."""
+    oi = OkxInstruments.__new__(OkxInstruments)
+    import threading, time
+    oi._cache = {symbol_inst.inst_id: symbol_inst}
+    oi._loaded_at = time.monotonic() + 1e9   # TTL hiç dolmasın
+    oi._ttl = 1e12
+    oi._lock = threading.Lock()
+    return oi
+
+
+def test_round_sz_and_px():
+    inst = Instrument("BTC-USDT-SWAP", ct_val=0.01, max_lever=100,
+                      min_sz=0.01, lot_sz=0.01, tick_sz=0.1)
+    assert inst.round_sz(1.237) == 1.23      # lot 0.01 → aşağı
+    assert inst.round_px(74000.07) == 74000.1
+
+
+def test_sizing_basic_btc():
+    inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
+    oi = _inst_with(inst)
+    # entry 74000, stop 72000 (~%2.7 SL), $20 risk → notional ~740
+    s = oi.size_for("BTCUSDT", 74000, 72000, 74000, risk_usd=20, equity=1000)
+    assert s.ok
+    assert abs(s.notional_usd - 740.74) < 1.0   # 20 / (2000/74000)
+    assert s.leverage == 1                        # 740 < 1000 equity
+    # sz = 740 / (74000*0.01) = 1.0 kontrat
+    assert abs(s.sz - 1.0) < 0.01
+
+
+def test_sizing_caps_at_max_lever():
+    # max 50x parite, çok dar stop → kaldıraç 50'de kapanmalı
+    inst = Instrument("SOL-USDT-SWAP", 1.0, 50, 0.01, 0.01, 0.01)
+    oi = _inst_with(inst)
+    # entry 180, stop 179.9 (%0.055 SL) → notional ~36000, equity 100 → ham lever 360
+    s = oi.size_for("SOLUSDT", 180, 179.9, 180, risk_usd=20, equity=100)
+    assert s.leverage == 50      # paritenin max'ı ile sınırlı (360 değil)
+
+
+def test_sizing_user_lever_cap():
+    inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
+    oi = _inst_with(inst)
+    s = oi.size_for("BTCUSDT", 74000, 73900, 74000, risk_usd=20, equity=100,
+                    max_user_lever=10)
+    assert s.leverage <= 10      # kullanıcı tavanı (parite 100 izin verse de)
+
+
+def test_sizing_below_min_sz():
+    inst = Instrument("BTC-USDT-SWAP", 0.01, 100, min_sz=1.0, lot_sz=0.01, tick_sz=0.1)
+    oi = _inst_with(inst)
+    # çok küçük risk → sz < min_sz=1.0
+    s = oi.size_for("BTCUSDT", 74000, 72000, 74000, risk_usd=0.5, equity=1000)
+    assert s.ok is False and "min" in s.reason
+
+
+def test_sizing_zero_sl():
+    inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
+    oi = _inst_with(inst)
+    s = oi.size_for("BTCUSDT", 74000, 74000, 74000, risk_usd=20, equity=1000)
+    assert s.ok is False
