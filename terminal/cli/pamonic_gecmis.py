@@ -19,6 +19,7 @@ import sqlite3
 import sys
 
 from terminal.db.store import Store
+from terminal.karakter.simulator import simulate_outcome
 from terminal.quality.htf_ltf import htf_for
 from terminal.quality.pamonic import find_order_blocks, pamonic_confluence
 
@@ -78,7 +79,7 @@ def _has_pamonic(conn, setup, near_bars, min_disp, lookback, ob_tf):
 
     OB farklı TF'de aransa bile PRZ (fiyat bölgesi) aynıdır — sadece OB'leri
     üreten mum çözünürlüğü değişir. Look-ahead: pencere D + birkaç bar.
-    Returns: (has_ob, ob_interval, data_ok)
+    Returns: (ob_or_None, ob_interval, data_ok)
     """
     ob_iv = _ob_interval(setup.interval, ob_tf)
     ims = _INTERVAL_MS.get(ob_iv, 3_600_000)
@@ -94,11 +95,57 @@ def _has_pamonic(conn, setup, near_bars, min_disp, lookback, ob_tf):
                    len(kl) - 1)
     ob = pamonic_confluence(setup, kl, min_displacement=min_disp,
                             near_bars=near_bars, d_index=d_index)
-    return ob is not None, ob_iv, True
+    return ob, ob_iv, True
+
+
+def _ob_stop(setup, ob, buffer_pct: float = 0.001) -> float:
+    """OB'nin arkasına dar stop. bull → OB.bottom altı, bear → OB.top üstü.
+
+    buffer_pct: blok kenarına küçük tampon (iğne payı). tradermiraz mantığı:
+    'stop'u OB'nin hemen arkasına koy → mesafe daralır, R:R yükselir.'
+    """
+    if setup.direction == "bull":
+        return ob.bottom * (1 - buffer_pct)
+    return ob.top * (1 + buffer_pct)
+
+
+def _resim_outcome(conn, setup, ob, buffer_pct: float = 0.001):
+    """OB-tabanlı DAR stop ile setup'ı yeniden simüle et (counterfactual).
+
+    Stop'u OB arkasına çeker, tp1'i AYNI tutar (R:R bu yüzden yükselir), sonra
+    simulate_outcome (limit giriş, canlı motor) ile gerçek mumlarda TP/STOP'u
+    yeniden hesaplar — dar stop bazı TP'leri STOP'a çevirebilir, bu DÜRÜST ölçüm.
+
+    Returns: (outcome, r_multiple) — r = realized R (dar stop'a göre).
+    """
+    new_stop = _ob_stop(setup, ob, buffer_pct)
+    risk = abs(setup.entry - new_stop)
+    if risk <= 0:
+        return None, 0.0
+    # Geleceğe ait mumlar (D sonrası) — yeniden simülasyon için
+    d_time = setup.pivots["D"].time
+    ims = _INTERVAL_MS.get(setup.interval, 3_600_000)
+    future = _klines_until(conn, setup.symbol, setup.interval, d_time,
+                           lookback_bars=0, interval_ms=ims, pad_after=300)
+    future = [k for k in future if k["open_time"] >= d_time]
+    if len(future) < 3:
+        return None, 0.0
+    # setup kopyası: stop = OB arkası (tp1/entry aynı)
+    import copy
+    s2 = copy.copy(setup)
+    s2.stop = new_stop
+    out = simulate_outcome(s2, future, entry_mode="limit")
+    rr = abs(setup.tp1 - setup.entry) / risk
+    if out.outcome == "TP":
+        return "TP", rr
+    if out.outcome == "STOP":
+        return "STOP", -1.0
+    return out.outcome, 0.0
 
 
 def analyze(db_path: str, near_bars: int, min_disp: float,
-            ob_tf: str = "same", lookback: int = 40) -> dict:
+            ob_tf: str = "same", lookback: int = 40,
+            resimule: bool = False) -> dict:
     store = Store(path=db_path)
     conn = store._conn
     rows = conn.execute(
@@ -114,6 +161,8 @@ def analyze(db_path: str, near_bars: int, min_disp: float,
     }
     per_pattern: dict[str, dict] = {}
     no_data = 0
+    # OB-stop yeniden simülasyonu (counterfactual): dar stop ile R toplamı
+    resim = {"tp": 0, "sl": 0, "other": 0, "total_r": 0.0, "rr_sum": 0.0, "n": 0}
 
     for r in rows:
         sid, symbol, interval, pattern, direction, outcome, pnl = (
@@ -122,11 +171,12 @@ def analyze(db_path: str, near_bars: int, min_disp: float,
         if setup is None:
             no_data += 1
             continue
-        has_pm, _ob_iv, ok = _has_pamonic(conn, setup, near_bars, min_disp,
-                                          lookback, ob_tf)
+        ob, _ob_iv, ok = _has_pamonic(conn, setup, near_bars, min_disp,
+                                      lookback, ob_tf)
         if not ok:
             no_data += 1
             continue
+        has_pm = ob is not None
 
         is_tp = outcome == "TP"
         for key in ("all", "pamonic" if has_pm else "no_pamonic"):
@@ -139,10 +189,25 @@ def analyze(db_path: str, near_bars: int, min_disp: float,
         if has_pm:
             pp["pm_n"] += 1
             pp["pm_tp" if is_tp else "pm_sl"] += 1
+            # OB varsa: dar stop ile yeniden simüle et (R:R sıçraması ölçümü)
+            if resimule:
+                ro, rr = _resim_outcome(conn, setup, ob)
+                if ro is not None:
+                    resim["n"] += 1
+                    resim["rr_sum"] += rr
+                    if ro == "TP":
+                        resim["tp"] += 1
+                        resim["total_r"] += rr
+                    elif ro == "STOP":
+                        resim["sl"] += 1
+                        resim["total_r"] -= 1.0
+                    else:
+                        resim["other"] += 1
 
     store.close()
     return {"buckets": buckets, "per_pattern": per_pattern,
-            "total": len(rows), "no_data": no_data, "ob_tf": ob_tf}
+            "total": len(rows), "no_data": no_data, "ob_tf": ob_tf,
+            "resim": resim}
 
 
 _OB_TF_LABEL = {"same": "Aynı TF", "ltf": "Alt TF (LTF)", "htf": "Üst TF (HTF)"}
@@ -192,6 +257,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="OB hangi TF'de aransın: same=harmonik TF, ltf=alt TF, htf=üst TF")
     ap.add_argument("--compare", action="store_true",
                     help="same/ltf/htf üçünü birden çalıştır, WR'leri kıyasla")
+    ap.add_argument("--resim", action="store_true",
+                    help="OB-tabanlı DAR stop ile yeniden simüle et — R:R sıçramasını "
+                         "ölç (stop OB arkasına, tp1 aynı; dar stop bazı TP'leri "
+                         "STOP'a çevirebilir → dürüst net R)")
     args = ap.parse_args(argv)
 
     if args.compare:
@@ -217,10 +286,31 @@ def main(argv: list[str] | None = None) -> int:
               f"{best[3]} işlem, P&L {best[4]:+.2f}")
         return 0
 
-    res = analyze(args.db, args.near_bars, args.min_disp, ob_tf=args.ob_tf)
+    res = analyze(args.db, args.near_bars, args.min_disp, ob_tf=args.ob_tf,
+                  resimule=args.resim)
     print(f"\n📊 PaMonic (OB@D, {_OB_TF_LABEL[args.ob_tf]}) Geçmiş Analizi — "
           f"{res['total']} sonuçlanmış işlem ({res['no_data']} veri yetersiz)\n")
     _print_one(res, args.ob_tf)
+
+    if args.resim:
+        rs = res["resim"]
+        n = rs["n"]
+        print(f"\n🎯 OB-tabanlı DAR STOP yeniden simülasyonu ({n} PaMonic işlemi):")
+        if n == 0:
+            print("  (yeniden simüle edilebilir PaMonic işlemi yok)")
+        else:
+            dec = rs["tp"] + rs["sl"]
+            wr = (rs["tp"] / dec * 100) if dec else 0.0
+            avg_rr = rs["rr_sum"] / n
+            other_str = f", {rs['other']} diğer" if rs["other"] else ""
+            print(f"  Ort. R:R (dar stop) : {avg_rr:.2f}   (geniş stop ~1.00 idi)")
+            print(f"  Yeniden WR          : {wr:.1f}%  "
+                  f"({rs['tp']} TP / {rs['sl']} STOP{other_str})")
+            print(f"  Toplam R (net)      : {rs['total_r']:+.2f}R")
+            print(f"  → Dar stop, TP'leri {rs['sl']} kez STOP'a çevirdi ama her TP "
+                  f"~{avg_rr:.1f}R kazandırdı. Net R yukarıdaki.")
+            print("  NOT: Bu R:R'nin OB ile NE KADAR yükseldiğini gösterir "
+                  "(tradermiraz'ın asıl iddiası). WR yerine NET R'ye bak.")
     return 0
 
 
