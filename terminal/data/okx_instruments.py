@@ -61,9 +61,16 @@ class OkxInstruments:
     """SWAP instrument cache + pozisyon boyutlandırma."""
 
     def __init__(self, base_url: str = OKX_BASE, timeout: float = HTTP_TIMEOUT,
-                 ttl: float = 3600.0) -> None:
+                 ttl: float = 3600.0, demo: bool = True) -> None:
+        # KRİTİK: demo header ŞART. OKX demo ile production'da kontrat specs FARKLI
+        # olabiliyor (örn. LIT-USDT-SWAP: prod ctVal=1, demo ctVal=10). Emirler
+        # demo'ya gittiği için instrument'ı da demo'dan çekmezsek ctVal uyuşmaz →
+        # sz N× şişer (notional/margin/risk N×). okx_trade & okx_futures ile aynı.
+        headers = {"User-Agent": "harmonik/1.0 (okx-inst)"}
+        if demo:
+            headers["x-simulated-trading"] = "1"
         self._client = httpx.Client(base_url=base_url, timeout=timeout,
-                                    headers={"User-Agent": "harmonik/1.0 (okx-inst)"})
+                                    headers=headers)
         self._cache: dict[str, Instrument] = {}
         self._loaded_at = 0.0
         self._ttl = ttl
