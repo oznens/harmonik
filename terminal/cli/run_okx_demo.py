@@ -141,6 +141,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-notional", type=float, default=3000.0,
                     help="Max pozisyon notional $ (0=sınırsız). PaMonic dar stop "
                          "notional'ı şişirir → bunu aşan setup atlanır (51008 önler).")
+    ap.add_argument("--target-margin", type=float, default=0.0,
+                    help="HEDEF margin $ (örn 30). Kaldıracı notional'a göre seçer ki "
+                         "her işlem ~bu kadar teminat tutsun → 1K bakiyeye çok poz. "
+                         "Risk yine $20 sabit. 0=kapalı (leverage/agresif kullan).")
     ap.add_argument("--max-open", type=int, default=0,
                     help="Aynı anda max açık pozisyon (0=sınırsız) — demo margin "
                          "tükenmesini (51008) önler. Örn 20.")
@@ -192,7 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     engine = OkxDemoEngine(store, trade_client, instruments,
                            risk_per_trade=args.risk, max_lever=args.max_lever,
                            pamonic=args.pamonic, max_open=args.max_open,
-                           fixed_leverage=args.leverage, max_notional=args.max_notional)
+                           fixed_leverage=args.leverage, max_notional=args.max_notional,
+                           target_margin=args.target_margin)
 
     log.info("OKX hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s",
              len(combos), args.poll_seconds, args.sync_seconds, args.pamonic)

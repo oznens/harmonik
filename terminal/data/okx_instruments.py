@@ -107,19 +107,21 @@ class OkxInstruments:
                  max_user_lever: int = 100,
                  aggressive_leverage: bool = True,
                  fixed_leverage: int = 0,
-                 max_notional: float = 0.0) -> Sizing | None:
+                 max_notional: float = 0.0,
+                 target_margin: float = 0.0) -> Sizing | None:
         """$risk + kaldıraç → OKX kontrat adedi.
 
         risk = $risk_usd (SL'e değerse kaybedilecek). SL mesafesi %p.
         Notional = risk / p (paper ile aynı — risk SL mesafesiyle sabit).
 
-        Kaldıraç:
-          aggressive_leverage=True (varsayılan): paritenin MAX kaldıracını kullan
-            → margin = notional/maxLever MİNİMUM olur → az parayla çok pozisyon.
-            (Kullanıcı isteği: "20$ riske, max kaldıraç, çok poz".)
-            ÖNEMLİ: risk yine $20 SABİT (SL mesafesi belirler), kaldıraç sadece
-            kaç $ teminat KİLİTLENECEĞİNİ değiştirir — kayıp miktarını DEĞİL.
-          aggressive_leverage=False: ceil(notional/equity) — margin yüksek, az poz.
+        Kaldıraç (öncelik sırası):
+          target_margin>0: HEDEF MARGIN modu — kaldıraç = notional/target_margin
+            (paritenin max'ıyla sınırlı). Her işlem ~target_margin $ teminat tutar
+            → 1K bakiyeye çok pozisyon sığar. Risk yine $20 SABİT.
+          fixed_leverage>0: sabit kaldıraç (paritenin max'ıyla sınırlı).
+          aggressive_leverage=True: paritenin MAX kaldıracı (margin minimum).
+          else: ceil(notional/equity).
+        ÖNEMLİ: kaldıraç sadece kaç $ KİLİTLENECEĞİNİ değiştirir, kayıp ($20) DEĞİL.
         """
         inst = self.get(symbol)
         if inst is None or inst.ct_val <= 0 or price <= 0 or entry <= 0:
@@ -134,8 +136,12 @@ class OkxInstruments:
             return Sizing(0, 1, round(notional, 2), 0, False,
                           f"notional ${notional:.0f} > tavan ${max_notional:.0f} "
                           f"(SL %{sl_pct*100:.2f} çok dar)")
-        if fixed_leverage > 0:
-            # Sabit kaldıraç (kullanıcı isteği: hep 20x) — paritenin max'ıyla sınırlı
+        if target_margin > 0:
+            # Hedef margin: kaldıracı notional'a göre seç ki her işlem ~target_margin
+            # teminat tutsun → 1K bakiyeye çok pozisyon. Paritenin max'ıyla sınırlı.
+            lever = int(min(max(1, round(notional / target_margin)), inst.max_lever))
+        elif fixed_leverage > 0:
+            # Sabit kaldıraç (paritenin max'ıyla sınırlı)
             lever = int(min(fixed_leverage, inst.max_lever))
         elif aggressive_leverage:
             # Max kaldıraç → margin minimum (az parayla çok pozisyon)

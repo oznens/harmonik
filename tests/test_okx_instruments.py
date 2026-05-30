@@ -35,6 +35,29 @@ def test_sizing_basic_btc_aggressive():
     assert abs(s.sz - 1.0) < 0.01                 # sz risk'e göre, kaldıraçtan bağımsız
 
 
+def test_target_margin():
+    """Hedef margin: kaldıraç notional'a göre seçilir, her işlem ~hedef teminat."""
+    inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
+    oi = _inst_with(inst)
+    # SL %2.7 → notional 740, hedef margin 30 → lever=740/30≈25, margin≈30
+    s = oi.size_for("BTCUSDT", 74000, 72000, 74000, risk_usd=20, equity=1000,
+                    target_margin=30)
+    assert s.ok
+    assert s.leverage == 25                  # round(740/30)
+    assert abs(s.margin_usd - 30) < 5        # ~hedef margin
+    assert abs(s.notional_usd - 740.74) < 1  # notional/risk değişmedi
+
+
+def test_target_margin_capped_at_max_lever():
+    """Çok dar stop → hedef margin için gereken kaldıraç parite max'ını aşar → max."""
+    inst = Instrument("SOL-USDT-SWAP", 1.0, 50, 0.01, 0.01, 0.01)
+    oi = _inst_with(inst)
+    # SL %0.4 → notional 5000, hedef 30 → lever 166 gerekir ama max 50 → margin 100
+    s = oi.size_for("SOLUSDT", 180, 179.28, 180, risk_usd=20, equity=1000,
+                    target_margin=30)
+    assert s.leverage == 50                  # paritenin max'ı (166 değil)
+
+
 def test_sizing_conservative_mode():
     """aggressive_leverage=False: eski davranış (margin yüksek, az poz)."""
     inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
