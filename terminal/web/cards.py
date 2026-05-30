@@ -40,6 +40,8 @@ CARD_CSS = """
             gap:10px; margin:6px 0 16px; }
   .tcard { background:#16161b; border:1px solid #2a2a32; border-left:4px solid #9aa0aa;
            border-radius:10px; padding:10px 12px; }
+  a.tclink { display:block; text-decoration:none; color:inherit; transition:border-color .15s; }
+  a.tclink:hover { border-color:#42a5f5; }
   .tc-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
   .tc-sym { font-size:16px; font-weight:800; letter-spacing:.3px; }
   .tc-tf { margin-left:auto; font-size:11px; color:#9aa0aa; border:1px solid #3a3a44;
@@ -168,8 +170,7 @@ def card_html(t: dict) -> str:
     stop = t.get("stop_price")
     tp = t.get("tp1_price")
 
-    return (
-        f'<div class="tcard" style="border-left-color:{color}">'
+    inner = (
         f'<div class="tc-head"><span class="tc-sym">{_e(t.get("symbol"))}</span>'
         f'<span class="tc-tf">{_e(t.get("interval"))}</span></div>'
         f'<div class="tc-tags">'
@@ -187,8 +188,13 @@ def card_html(t: dict) -> str:
         f'<div class="row"><span class="k">Hedef</span><b class="g">{_fmt_price(tp)}</b></div>'
         f'</div></div>'
         f'<div class="tc-foot">{_e(foot)}</div>'
-        f'</div>'
     )
+    # setup_id varsa kartın tamamı çıkış-işaretli setup grafiğine link olur.
+    sid = t.get("setup_id")
+    if sid:
+        return (f'<a class="tcard tclink" href="/chart?id={int(sid)}" '
+                f'style="border-left-color:{color}">{inner}</a>')
+    return f'<div class="tcard" style="border-left-color:{color}">{inner}</div>'
 
 
 def cards_grid_html(trades: list[dict], empty_msg: str = "Henüz kart yok.") -> str:
@@ -206,14 +212,14 @@ def connect_ro(db_path) -> sqlite3.Connection:
 
 # paper_trades + setups JOIN sütun sırası (load_card_trades pozisyonel okur)
 _COLS = (
-    "pt.symbol", "pt.interval", "pt.pattern", "pt.direction",
+    "pt.setup_id", "pt.symbol", "pt.interval", "pt.pattern", "pt.direction",
     "pt.entry_price", "pt.stop_price", "pt.tp1_price", "pt.exit_price",
     "pt.outcome", "pt.opened_at", "pt.closed_at",
     "s.x_price", "s.a_price", "s.b_price", "s.c_price", "s.d_price",
     "s.x_time", "s.a_time", "s.b_time", "s.c_time", "s.d_time",
 )
 _KEYS = (
-    "symbol", "interval", "pattern", "direction",
+    "setup_id", "symbol", "interval", "pattern", "direction",
     "entry_price", "stop_price", "tp1_price", "exit_price",
     "outcome", "opened_at", "closed_at",
     "x_price", "a_price", "b_price", "c_price", "d_price",
