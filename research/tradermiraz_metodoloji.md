@@ -204,6 +204,13 @@ kalsa bile net kâr katlanır" (tradermiraz'ın özü). Bu bulgu §9.1'deki "200
 kararını GÜÇLENDİRİR — potansiyel gerçek, doğru ölçmeye değer. Shadow moda
 geçilince R:R'yi de slippage'li gerçek motorla ölç.
 
+**⛔ DÜZELTME (3.64 yanıltıcı — metodoloji hatası):** `--resim` dar stop aldı ama
+tp1'i ESKİ geniş-stop 1R'sinde bıraktı → "küçük risk al, eski uzak hedefe nişan
+al" = R:R'yi YAPAY şişirdi. Tutarlı ölçüm için TP de yapısal bir dayanağa (D→C/D→A
+harmonik hedef) oturmalı; "eski 1R" değil. 3.64 sayısını CİDDİYE ALMA. Doğru R:R
+ölçümü yapısal-TP ile + Shadow'da slippage'li gerçek motorla yapılacak. (Kullanıcı
+bu turda yapısal-TP re-testini erteledi.)
+
 ---
 
 *Bu döküm yaşayan bir belgedir; yeni tweet/analiz geldikçe güncellenir.*
