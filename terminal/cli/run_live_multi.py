@@ -633,6 +633,8 @@ def main(argv: list[str] | None = None) -> int:
         paper_engine = PaperEngine(
             shared_store, initial_equity=args.paper_equity,
             risk_per_trade=args.paper_risk,
+            entry_slippage_pct=args.paper_entry_slippage,
+            stop_slippage_pct=args.paper_stop_slippage,
         )
         # Açılışta: lifecycle terminal olduğu halde açık kalmış paper trade'leri
         # kapat (stop değdi ama paper açık kaldıysa düzeltir).

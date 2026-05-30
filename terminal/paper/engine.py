@@ -29,6 +29,11 @@ RISK_PER_TRADE_USD = 20.0
 INITIAL_EQUITY_USD = 1000.0
 COMMISSION_PCT = 0.0006  # MEXC futures taker %0.06
 
+# Slippage (gerçeğe yakınlık): giriş limit emirde hafif ters kayma; STOP market
+# emir olduğu için stop seviyesini geçip daha kötüden dolar. TP limit → kayma yok.
+ENTRY_SLIPPAGE_PCT = 0.0002   # %0.02 — giriş dolumu aleyhte
+STOP_SLIPPAGE_PCT = 0.0005    # %0.05 — stop market kayması (aleyhte)
+
 
 @dataclass
 class PaperTrade:
@@ -90,10 +95,15 @@ class PaperEngine:
     """Paper trade motoru. Store'a okuma/yazma yapar."""
 
     def __init__(self, store: Store, initial_equity: float = INITIAL_EQUITY_USD,
-                 risk_per_trade: float = RISK_PER_TRADE_USD) -> None:
+                 risk_per_trade: float = RISK_PER_TRADE_USD,
+                 entry_slippage_pct: float = ENTRY_SLIPPAGE_PCT,
+                 stop_slippage_pct: float = STOP_SLIPPAGE_PCT) -> None:
         self.store = store
         self.initial_equity = initial_equity
         self.risk_per_trade = risk_per_trade
+        # Slippage oranları (gerçeğe yakınlık). 0 = kapalı (eski davranış).
+        self.entry_slippage_pct = entry_slippage_pct
+        self.stop_slippage_pct = stop_slippage_pct
         # Paylaşılan engine birden çok worker thread'inden çağrılır; tek SQLite
         # bağlantısı üzerinde eşzamanlı yazımları serileştir. RLock: open_trade
         # içeride get_equity'yi de çağırıyor (yeniden girişli).
@@ -195,6 +205,13 @@ class PaperEngine:
             return None
 
         fill = entry_price if entry_price is not None else setup.entry
+        # Giriş slippage'i: dolum hep ALEYHTE kayar (bull → biraz pahalı al,
+        # bear → biraz ucuz sat). Limit emirde marketable dolum gerçekçiliği.
+        if self.entry_slippage_pct > 0:
+            if setup.direction == "bull":
+                fill *= (1 + self.entry_slippage_pct)
+            else:
+                fill *= (1 - self.entry_slippage_pct)
         self.store._conn.execute(
             """INSERT INTO paper_trades
                (setup_id, symbol, interval, pattern, direction,
@@ -235,12 +252,21 @@ class PaperEngine:
         if already_closed is not None:
             return None  # zaten kapalı
 
-        # P&L: pozisyon * (exit - entry) / entry (bull) veya (entry - exit) / entry (bear)
+        # P&L: pozisyon * (exit - entry) / entry. entry zaten slippage'li fill.
+        # TP = limit emir (tam tp1, kayma yok). STOP = market emir → stop'u geçip
+        # daha kötüden dolar (aleyhte slippage).
         if outcome == "TP":
             pnl_pct = abs(tp1 - entry) / entry
             pnl_gross = position * pnl_pct
         elif outcome == "STOP":
-            pnl_pct = abs(entry - stop) / entry
+            stop_fill = stop
+            if self.stop_slippage_pct > 0:
+                # bull → stop'un ALTINDAN, bear → ÜSTÜNDEN dolar (her zaman aleyhte)
+                if dirn == "bull":
+                    stop_fill = stop * (1 - self.stop_slippage_pct)
+                else:
+                    stop_fill = stop * (1 + self.stop_slippage_pct)
+            pnl_pct = abs(entry - stop_fill) / entry
             pnl_gross = -position * pnl_pct  # zarar
         else:  # EO / ZI / Aday / Aktif
             pnl_gross = 0.0  # pozisyon açılmadı veya kapanmadı
