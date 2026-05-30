@@ -215,6 +215,20 @@ class OkxDemoEngine:
             sl_px = inst.round_px(stop_level)
             cl_id = f"h{setup_id}"[:32]
 
+            # SON GÜVENLİK (51053): OKX iliştirilmiş TP/SL'i emir fiyatına göre
+            # kontrol eder. side ile YUVARLANMIŞ seviyelerin tutarlılığını garantile
+            # — buy → sl<entry<tp, sell → tp<entry<sl. Değilse emri ATMA (yuvarlama
+            # sonrası ters dönebilir; ya da setup seviyeleri tutarsız).
+            if side == "buy":
+                consistent = sl_px < entry_px < tp_px
+            else:
+                consistent = tp_px < entry_px < sl_px
+            if not consistent:
+                log.info("OKX SKIP: %s %s yuvarlama sonrası SL/TP tutarsız "
+                         "(entry=%.6g SL=%.6g TP=%.6g) → emir atma",
+                         setup.symbol, side, entry_px, sl_px, tp_px)
+                return None
+
             self.client.set_leverage(setup.symbol, sizing.leverage)
             try:
                 r = self.client.place_order(
