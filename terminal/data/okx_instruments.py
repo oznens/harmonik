@@ -105,7 +105,8 @@ class OkxInstruments:
     def size_for(self, symbol: str, entry: float, stop: float, price: float,
                  risk_usd: float, equity: float,
                  max_user_lever: int = 100,
-                 aggressive_leverage: bool = True) -> Sizing | None:
+                 aggressive_leverage: bool = True,
+                 fixed_leverage: int = 0) -> Sizing | None:
         """$risk + kaldıraç → OKX kontrat adedi.
 
         risk = $risk_usd (SL'e değerse kaybedilecek). SL mesafesi %p.
@@ -126,7 +127,10 @@ class OkxInstruments:
         if sl_pct <= 0:
             return Sizing(0, 1, 0, 0, False, "SL mesafesi 0")
         notional = risk_usd / sl_pct
-        if aggressive_leverage:
+        if fixed_leverage > 0:
+            # Sabit kaldıraç (kullanıcı isteği: hep 20x) — paritenin max'ıyla sınırlı
+            lever = int(min(fixed_leverage, inst.max_lever))
+        elif aggressive_leverage:
             # Max kaldıraç → margin minimum (az parayla çok pozisyon)
             lever = int(min(inst.max_lever, max_user_lever))
         else:

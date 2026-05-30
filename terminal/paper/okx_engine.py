@@ -64,11 +64,15 @@ class OkxDemoEngine:
                  risk_per_trade: float = RISK_PER_TRADE_USD,
                  initial_equity: float = INITIAL_EQUITY_USD,
                  max_lever: int = MAX_USER_LEVER,
-                 pamonic: bool = False, max_open: int = 0) -> None:
+                 pamonic: bool = False, max_open: int = 0,
+                 fixed_leverage: int = 0) -> None:
         """pamonic=True: PaMonic modu — OB yoksa pas geç (enforce), OB varsa
         stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef).
         max_open: aynı anda max açık pozisyon (0=sınırsız) — margin tükenmesini
-        (51008) önler."""
+        (51008) önler.
+        fixed_leverage: sabit kaldıraç (>0). 0=agresif (paritenin max'ı). Kullanıcı
+        sabit 20x isterse 20. Risk yine $20 SABİT (SL belirler), kaldıraç sadece
+        kilitlenen teminatı belirler (cross margin)."""
         self.store = store
         self.client = client
         self.instruments = instruments
@@ -77,6 +81,7 @@ class OkxDemoEngine:
         self.max_lever = max_lever
         self.pamonic = pamonic
         self.max_open = max_open
+        self.fixed_leverage = fixed_leverage
         self._lock = threading.RLock()
         self._migrate()
 
@@ -180,7 +185,8 @@ class OkxDemoEngine:
             equity = self._equity()
             sizing = self.instruments.size_for(
                 setup.symbol, setup.entry, stop_level, setup.entry,
-                risk_usd=self.risk, equity=equity, max_user_lever=self.max_lever)
+                risk_usd=self.risk, equity=equity, max_user_lever=self.max_lever,
+                fixed_leverage=self.fixed_leverage)
             if sizing is None or not sizing.ok:
                 log.info("OKX SKIP: %s boyut hesaplanamadı (%s)", setup.symbol,
                          sizing.reason if sizing else "instrument yok")
