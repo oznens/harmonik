@@ -19,7 +19,23 @@ import sqlite3
 import sys
 
 from terminal.db.store import Store
+from terminal.quality.htf_ltf import htf_for
 from terminal.quality.pamonic import find_order_blocks, pamonic_confluence
+
+# 15m harmonik için "alt TF" (LTF) eşlemesi — OB'yi daha ince çözünürlükte ara.
+_LTF_MAPPING = {
+    "5m": "1m", "15m": "5m", "30m": "15m", "60m": "15m",
+    "2h": "30m", "4h": "60m", "8h": "2h", "1d": "4h",
+}
+
+
+def _ob_interval(setup_interval: str, ob_tf: str) -> str:
+    """OB'nin aranacağı zaman dilimi. same=setup TF, ltf=alt TF, htf=üst TF."""
+    if ob_tf == "ltf":
+        return _LTF_MAPPING.get(setup_interval, setup_interval)
+    if ob_tf == "htf":
+        return htf_for(setup_interval) or setup_interval
+    return setup_interval
 
 
 def _klines_until(conn: sqlite3.Connection, symbol: str, interval: str,
@@ -57,8 +73,32 @@ def _wr(tp: int, sl: int) -> float:
     return (tp / d * 100) if d else 0.0
 
 
+def _has_pamonic(conn, setup, near_bars, min_disp, lookback, ob_tf):
+    """Setup'ın PRZ'sinde, `ob_tf` (same/ltf/htf) TF mumlarından OB var mı?
+
+    OB farklı TF'de aransa bile PRZ (fiyat bölgesi) aynıdır — sadece OB'leri
+    üreten mum çözünürlüğü değişir. Look-ahead: pencere D + birkaç bar.
+    Returns: (has_ob, ob_interval, data_ok)
+    """
+    ob_iv = _ob_interval(setup.interval, ob_tf)
+    ims = _INTERVAL_MS.get(ob_iv, 3_600_000)
+    d_time = setup.pivots["D"].time
+    # OB TF küçükse aynı zaman aralığını kapsamak için lookback'i ölçekle
+    setup_ims = _INTERVAL_MS.get(setup.interval, 3_600_000)
+    scaled_lookback = max(lookback, int(lookback * setup_ims / ims))
+    kl = _klines_until(conn, setup.symbol, ob_iv, d_time, scaled_lookback, ims)
+    if len(kl) < 5:
+        return None, ob_iv, False
+    d_index = next((i for i, k in enumerate(kl) if k["open_time"] <= d_time
+                    and (i + 1 >= len(kl) or kl[i + 1]["open_time"] > d_time)),
+                   len(kl) - 1)
+    ob = pamonic_confluence(setup, kl, min_displacement=min_disp,
+                            near_bars=near_bars, d_index=d_index)
+    return ob is not None, ob_iv, True
+
+
 def analyze(db_path: str, near_bars: int, min_disp: float,
-            lookback: int = 40) -> dict:
+            ob_tf: str = "same", lookback: int = 40) -> dict:
     store = Store(path=db_path)
     conn = store._conn
     rows = conn.execute(
@@ -67,7 +107,6 @@ def analyze(db_path: str, near_bars: int, min_disp: float,
         "ORDER BY closed_at"
     ).fetchall()
 
-    # Kovalar: tüm / PaMonic var / PaMonic yok
     buckets = {
         "all":    {"tp": 0, "sl": 0, "pnl": 0.0},
         "pamonic": {"tp": 0, "sl": 0, "pnl": 0.0},
@@ -83,18 +122,11 @@ def analyze(db_path: str, near_bars: int, min_disp: float,
         if setup is None:
             no_data += 1
             continue
-        ims = _INTERVAL_MS.get(interval, 3_600_000)
-        d_idx_time = setup.pivots["D"].time
-        kl = _klines_until(conn, symbol, interval, d_idx_time, lookback, ims)
-        if len(kl) < 5:
+        has_pm, _ob_iv, ok = _has_pamonic(conn, setup, near_bars, min_disp,
+                                          lookback, ob_tf)
+        if not ok:
             no_data += 1
             continue
-        # D'nin kline penceresindeki indeksi (yoksa son bar)
-        d_index = next((i for i, k in enumerate(kl) if k["open_time"] == d_idx_time),
-                       len(kl) - 1)
-        ob = pamonic_confluence(setup, kl, min_displacement=min_disp,
-                                near_bars=near_bars, d_index=d_index)
-        has_pm = ob is not None
 
         is_tp = outcome == "TP"
         for key in ("all", "pamonic" if has_pm else "no_pamonic"):
@@ -110,7 +142,41 @@ def analyze(db_path: str, near_bars: int, min_disp: float,
 
     store.close()
     return {"buckets": buckets, "per_pattern": per_pattern,
-            "total": len(rows), "no_data": no_data}
+            "total": len(rows), "no_data": no_data, "ob_tf": ob_tf}
+
+
+_OB_TF_LABEL = {"same": "Aynı TF", "ltf": "Alt TF (LTF)", "htf": "Üst TF (HTF)"}
+
+
+def _print_one(res: dict, ob_tf: str, show_pattern: bool = True) -> None:
+    b = res["buckets"]
+    all_wr = _wr(b["all"]["tp"], b["all"]["sl"])
+    pm_wr = _wr(b["pamonic"]["tp"], b["pamonic"]["sl"])
+    pm_n = b["pamonic"]["tp"] + b["pamonic"]["sl"]
+    print(f"{'Strateji':<24}{'İşlem':>7}{'TP':>5}{'SL':>5}{'WR':>8}{'P&L':>11}")
+    for key, label in (("all", "Tümü (mevcut)"),
+                       ("pamonic", "PaMonic VAR (filtre)"),
+                       ("no_pamonic", "PaMonic YOK (elenen)")):
+        d = b[key]
+        n = d["tp"] + d["sl"]
+        print(f"{label:<24}{n:>7}{d['tp']:>5}{d['sl']:>5}"
+              f"{_wr(d['tp'], d['sl']):>7.1f}%{d['pnl']:>+10.2f}")
+    if pm_n == 0:
+        print("⚠️ Hiçbir işlemde PaMonic bulunamadı (veri/eşik?).")
+    else:
+        diff = pm_wr - all_wr
+        sign = "↑" if diff > 0 else "↓" if diff < 0 else "="
+        print(f"→ PaMonic WR {diff:+.1f} puan {sign} ({all_wr:.1f}%→{pm_wr:.1f}%), "
+              f"işlem {res['total']}→{pm_n} (%{pm_n/max(1,res['total'])*100:.0f}).")
+    if show_pattern:
+        print(f"\n{'Pattern':<18}{'Tüm WR':>9}{'PaMonic WR':>13}{'PaMonic N':>11}")
+        for pat, p in sorted(res["per_pattern"].items(),
+                             key=lambda x: -(x[1]["all_tp"] + x[1]["all_sl"])):
+            all_n = p["all_tp"] + p["all_sl"]
+            pm_n2 = p["pm_tp"] + p["pm_sl"]
+            pm_str = f"{_wr(p['pm_tp'], p['pm_sl']):.0f}%" if pm_n2 else "—"
+            print(f"{pat:<18}{_wr(p['all_tp'], p['all_sl']):>8.0f}%{pm_str:>13}"
+                  f"{pm_n2:>8}/{all_n}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,45 +188,39 @@ def main(argv: list[str] | None = None) -> int:
                     help="OB, D'nin son bu kadar barı içinde aranır (taze OB)")
     ap.add_argument("--min-disp", type=float, default=0.003,
                     help="OB impuls eşiği (zayıf blokları ele)")
+    ap.add_argument("--ob-tf", choices=["same", "ltf", "htf"], default="same",
+                    help="OB hangi TF'de aransın: same=harmonik TF, ltf=alt TF, htf=üst TF")
+    ap.add_argument("--compare", action="store_true",
+                    help="same/ltf/htf üçünü birden çalıştır, WR'leri kıyasla")
     args = ap.parse_args(argv)
 
-    res = analyze(args.db, args.near_bars, args.min_disp)
-    b = res["buckets"]
+    if args.compare:
+        print("\n📊 PaMonic OB-TF Karşılaştırması — 15m harmonik için OB hangi "
+              "TF'de en iyi?\n")
+        summary = []
+        for tf in ("same", "ltf", "htf"):
+            res = analyze(args.db, args.near_bars, args.min_disp, ob_tf=tf)
+            print(f"━━━ {_OB_TF_LABEL[tf]} ({tf}) ━━━")
+            _print_one(res, tf, show_pattern=False)
+            b = res["buckets"]
+            pm_n = b["pamonic"]["tp"] + b["pamonic"]["sl"]
+            summary.append((tf, _wr(b["all"]["tp"], b["all"]["sl"]),
+                            _wr(b["pamonic"]["tp"], b["pamonic"]["sl"]),
+                            pm_n, b["pamonic"]["pnl"]))
+            print()
+        print("═" * 56)
+        print(f"{'OB-TF':<14}{'Baz WR':>9}{'PaMonic WR':>13}{'N':>6}{'PaMonic P&L':>14}")
+        for tf, awr, pwr, n, pnl in summary:
+            print(f"{_OB_TF_LABEL[tf]:<14}{awr:>8.1f}%{pwr:>12.1f}%{n:>6}{pnl:>+13.2f}")
+        best = max(summary, key=lambda x: (x[2], x[4]))   # en iyi PaMonic WR, sonra P&L
+        print(f"\n🏆 En iyi: {_OB_TF_LABEL[best[0]]} — PaMonic WR {best[2]:.1f}%, "
+              f"{best[3]} işlem, P&L {best[4]:+.2f}")
+        return 0
 
-    print(f"\n📊 PaMonic (OB@D) Geçmiş Analizi — {res['total']} sonuçlanmış işlem "
-          f"({res['no_data']} veri yetersiz)\n")
-    print(f"{'Strateji':<24}{'İşlem':>7}{'TP':>5}{'SL':>5}{'WR':>8}{'P&L':>11}")
-    for key, label in (("all", "Tümü (mevcut)"),
-                       ("pamonic", "PaMonic VAR (filtre)"),
-                       ("no_pamonic", "PaMonic YOK (elenen)")):
-        d = b[key]
-        n = d["tp"] + d["sl"]
-        print(f"{label:<24}{n:>7}{d['tp']:>5}{d['sl']:>5}"
-              f"{_wr(d['tp'], d['sl']):>7.1f}%{d['pnl']:>+10.2f}")
-
-    # Yorum
-    all_wr = _wr(b["all"]["tp"], b["all"]["sl"])
-    pm_wr = _wr(b["pamonic"]["tp"], b["pamonic"]["sl"])
-    pm_n = b["pamonic"]["tp"] + b["pamonic"]["sl"]
-    print()
-    if pm_n == 0:
-        print("⚠️ Hiçbir geçmiş işlemde PaMonic bulunamadı (veri/eşik?).")
-    else:
-        diff = pm_wr - all_wr
-        sign = "ARTIRIRDI ✅" if diff > 0 else "DÜŞÜRÜRDÜ ❌" if diff < 0 else "DEĞİŞTİRMEZDİ"
-        print(f"PaMonic filtresi WR'yi {diff:+.1f} puan {sign} "
-              f"({all_wr:.1f}% → {pm_wr:.1f}%), ama işlem sayısı {res['total']}→{pm_n} "
-              f"(%{pm_n/max(1,res['total'])*100:.0f}'e düşerdi).")
-
-    print(f"\n{'Pattern bazında':<18}{'Tüm WR':>9}{'PaMonic WR':>13}{'PaMonic N':>11}")
-    for pat, p in sorted(res["per_pattern"].items(),
-                         key=lambda x: -(x[1]["all_tp"] + x[1]["all_sl"])):
-        all_n = p["all_tp"] + p["all_sl"]
-        pm_n2 = p["pm_tp"] + p["pm_sl"]
-        all_wr2 = _wr(p["all_tp"], p["all_sl"])
-        pm_wr2 = _wr(p["pm_tp"], p["pm_sl"])
-        pm_str = f"{pm_wr2:.0f}%" if pm_n2 else "—"
-        print(f"{pat:<18}{all_wr2:>8.0f}%{pm_str:>13}{pm_n2:>8}/{all_n}")
+    res = analyze(args.db, args.near_bars, args.min_disp, ob_tf=args.ob_tf)
+    print(f"\n📊 PaMonic (OB@D, {_OB_TF_LABEL[args.ob_tf]}) Geçmiş Analizi — "
+          f"{res['total']} sonuçlanmış işlem ({res['no_data']} veri yetersiz)\n")
+    _print_one(res, args.ob_tf)
     return 0
 
 
