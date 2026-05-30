@@ -181,6 +181,29 @@ kullanıyor, **değişiklik gerekmez.** `pamonic_gecmis --compare` ile tekrar
 kâr DEĞİL, **zarar** ediyor (−26.94$). PaMonic VAR: +70.53$. Yani örneklem
 büyüdükçe OB'nin ayırt ediciliği ARTIYOR — "200'de bak" kararını destekliyor.
 
+### 9.3 OB-tabanlı DAR STOP → R:R sıçraması (kayıt; iyimser, doğrula)
+tradermiraz'ın ASIL iddiası: OB filtresi sadece WR değil, **stop'u OB arkasına
+çekip R:R'yi 1.0→1.5-2.0'a fırlatır**. `pamonic_gecmis --resim` bunu ölçer:
+stop = OB.bottom/top arkası, tp1 aynı, gerçek mumlarda `simulate_outcome` ile
+yeniden hesap (dar stop bazı TP'leri STOP'a çevirebilir → dürüst counterfactual).
+
+**Sonuç (44 işlem, 16 PaMonic, 2026-05-30):**
+- Ort. R:R (dar stop): **3.64** (geniş stop ~1.00 idi)
+- Yeniden WR: **%68.8** (11 TP / 5 STOP — dar stop WR'yi DÜŞÜRMEDİ!)
+- Toplam net R: **+58.19R** (geniş stop'la ~+11R yerine)
+
+**⚠️ İYİMSER — gerçekte daha düşük olur, sebepleri:**
+1. R:R 3.64 fazla yüksek = OB'ler D'ye çok yakın (stop mesafesi minik) → gerçekte
+   likidite/iğne ile daha sık vurulur; mum-bazlı sim bunu tam yakalamaz.
+2. **Slippage YOK** bu simde — dar stopta slippage ORANSAL çok daha can yakar
+   (5$ mesafede %0.05, 50$ mesafeden çok daha büyük etki) → canlıda R:R düşer.
+3. 16 işlem = istatistiksel anlam yok.
+
+**Yine de:** Potansiyel BÜYÜK. 3.64 olmasa bile 2.0+ çıkması çok olası → "WR aynı
+kalsa bile net kâr katlanır" (tradermiraz'ın özü). Bu bulgu §9.1'deki "200'de bak"
+kararını GÜÇLENDİRİR — potansiyel gerçek, doğru ölçmeye değer. Shadow moda
+geçilince R:R'yi de slippage'li gerçek motorla ölç.
+
 ---
 
 *Bu döküm yaşayan bir belgedir; yeni tweet/analiz geldikçe güncellenir.*
