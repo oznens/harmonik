@@ -85,6 +85,18 @@ def test_open_trade_places_order(store):
     assert len(eng.open_positions()) == 1
 
 
+def test_skips_if_okx_already_has_position(store):
+    """KRİTİK: OKX'te o paritede gerçek açık pozisyon varsa emir atma (birikme/-601 bug)."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    # OKX'te TESTUSDT zaten açık (DB boş ama OKX'te var → birikme riski)
+    fake.positions = lambda: [{"instId": "TEST-USDT-SWAP", "pos": "100"}]
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)
+    assert t is None                       # OKX gerçek kontrol → atladı
+    assert len(fake.placed) == 0           # emir GİTMEDİ
+
+
 def test_one_position_per_symbol(store):
     s, sid = _setup(store)
     fake = _FakeOkx()

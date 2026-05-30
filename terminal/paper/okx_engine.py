@@ -141,7 +141,7 @@ class OkxDemoEngine:
         bulunamaz → enforce: pas geç).
         """
         with self._lock:
-            # Zaten açık mı (aynı setup) / parite başı tek pozisyon
+            # Zaten açık mı (aynı setup) / parite başı tek pozisyon (DB)
             if self.store._conn.execute(
                     "SELECT 1 FROM okx_trades WHERE setup_id=?", (setup_id,)
             ).fetchone() is not None:
@@ -151,6 +151,18 @@ class OkxDemoEngine:
                 (setup.symbol,)).fetchone()
             if busy is not None:
                 log.info("OKX SKIP: %s zaten açık pozisyonda (parite başı tek)", setup.symbol)
+                return None
+            # KRİTİK: OKX'in GERÇEK pozisyonunu da kontrol et (DB sync gecikmesi →
+            # aynı parite birikip dev pozisyon olmasını engeller — -601 bug'ı).
+            inst = self._inst_id(setup.symbol)
+            try:
+                live_insts = {p.get("instId") for p in self.client.positions()
+                              if float(p.get("pos") or 0) != 0}
+            except OkxAuthError:
+                live_insts = set()
+            if inst in live_insts:
+                log.info("OKX SKIP: %s OKX'te ZATEN açık pozisyon (gerçek kontrol)",
+                         setup.symbol)
                 return None
             # Max açık pozisyon sınırı (margin tükenmesini önler)
             if self.max_open > 0:
