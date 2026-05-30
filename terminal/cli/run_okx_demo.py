@@ -28,6 +28,7 @@ from terminal.data.okx_instruments import OkxInstruments
 from terminal.data.okx_trade import OkxDemoClient
 from terminal.db.store import Store
 from terminal.detection.scanner import default_threshold, scan_klines
+from terminal.lifecycle.states import TERMINAL_STATES
 from terminal.lifecycle.tracker import LifecycleTracker
 from terminal.paper.okx_engine import OkxDemoEngine
 from terminal.quality.htf_ltf import htf_for
@@ -69,12 +70,16 @@ class OkxWorker:
         self._klines: list[dict[str, Any]] = []   # son tarama mumları (PaMonic OB için)
 
     def _on_transition(self, t) -> None:
-        # Sadece AKTIF geçişinde demo emri at (paper'ın limit moduna benzer)
+        # AKTIF geçişinde demo emri at (paper'ın limit moduna benzer)
         if t.new_state == "Aktif" and t.setup_id is not None:
             if t.setup.elenen:
                 return
             self.engine.open_trade(t.setup, t.setup_id, t.trigger_time,
                                    klines=self._klines)
+        # Setup terminal'e (TP/STOP/ZI/EO) geçti: limit emrimiz DOLMADIYSA artık
+        # geçersiz (hareket bizsiz oldu) → iptal et, margin+parite serbest kalsın.
+        elif t.new_state in TERMINAL_STATES and t.setup_id is not None:
+            self.engine.cancel_if_unfilled(t.setup_id)
 
     def run(self) -> None:
         time.sleep(self.startup_delay)

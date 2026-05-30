@@ -142,6 +142,65 @@ def test_one_position_per_symbol(store):
     assert len(fake.placed) == 1
 
 
+def test_cancel_if_unfilled_cancels_live_order(store):
+    """Setup terminal'e gitti, limit DOLMADI (live) → emir iptal + DB canceled."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)
+    assert t is not None and fake.orders[t.ord_id]["state"] == "live"
+    canceled = eng.cancel_if_unfilled(sid)
+    assert canceled is True
+    row = store._conn.execute(
+        "SELECT state, closed_at FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()
+    assert row[0] == "canceled" and row[1] is not None
+
+
+def test_cancel_if_unfilled_skips_filled_order(store):
+    """Emir DOLMUŞSA (pozisyon) iptal etme — filled işaretle, sync kapanışı yönetsin."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)
+    fake.orders[t.ord_id]["state"] = "filled"     # emir doldu (gerçek pozisyon)
+    canceled = eng.cancel_if_unfilled(sid)
+    assert canceled is False
+    row = store._conn.execute(
+        "SELECT state, closed_at FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()
+    assert row[0] == "filled" and row[1] is None   # açık kaldı, iptal edilmedi
+
+
+def test_sync_cancels_orphan_limit_on_terminal_setup(store):
+    """Backstop: dolmamış limit + setup lifecycle terminal (TP) → sync iptal eder."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)     # live limit (dolmadı)
+    # Tracker setup'ı TP işaretledi ama emir hâlâ live (fiyat entry'ye dönmedi)
+    store.upsert_lifecycle(setup_id=sid, state="TP", state_changed_at=s.detected_at,
+                           entered_at=s.detected_at, exited_at=s.detected_at,
+                           exit_reason="tp1")
+    n = eng.sync()
+    assert n == 1
+    row = store._conn.execute(
+        "SELECT state, closed_at FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()
+    assert row[0] == "canceled" and row[1] is not None
+
+
+def test_sync_keeps_unfilled_when_setup_active(store):
+    """Setup hâlâ AKTIF (terminal değil) ise dolmamış limit iptal EDİLMEZ."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    eng.open_trade(s, sid, s.detected_at)
+    store.upsert_lifecycle(setup_id=sid, state="Aktif", state_changed_at=s.detected_at,
+                           entered_at=s.detected_at, exited_at=None, exit_reason=None)
+    eng.sync()
+    row = store._conn.execute(
+        "SELECT state FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()
+    assert row[0] == "live"   # dokunulmadı
+
+
 def test_sync_closes_on_history_pnl(store):
     s, sid = _setup(store)
     fake = _FakeOkx()

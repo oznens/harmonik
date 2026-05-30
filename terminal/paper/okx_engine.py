@@ -22,6 +22,7 @@ from terminal.data.okx_instruments import OkxInstruments
 from terminal.data.okx_trade import OkxAuthError, OkxDemoClient
 from terminal.db.store import Store
 from terminal.detection.models import Setup
+from terminal.lifecycle.states import TERMINAL_STATES
 from terminal.quality.pamonic import pamonic_confluence
 
 log = logging.getLogger(__name__)
@@ -316,11 +317,75 @@ class OkxDemoEngine:
         sign = 1.0 if direction == "bull" else -1.0
         return notional * pct * sign
 
+    def _cancel_unfilled(self, symbol: str, ord_id: str, setup_id: int,
+                         now: int, ostate: str | None = None) -> bool:
+        """Dolmamış limit emri OKX'te iptal et + DB'de canceled işaretle.
+
+        Lock ÇAĞIRAN tarafta tutulur (RLock reentrant). ostate verilmezse OKX'ten
+        okunur. Emir (kısmen) dolmuşsa iptal ETMEZ — pozisyon vardır, sync kapanışı
+        yönetir (state='filled' bırakılır). Returns True sadece temiz iptalde.
+        """
+        if ostate is None:
+            try:
+                ostate = self.client.order_state(symbol, ord_id).get("state", "")
+            except OkxAuthError:
+                return False
+        if ostate in ("filled", "partially_filled"):
+            # (Kısmen) doldu → pozisyon açık; iptal değil filled bırak (sync kapatır)
+            self.store._conn.execute(
+                "UPDATE okx_trades SET state='filled' WHERE setup_id=? AND state='live'",
+                (setup_id,))
+            return False
+        try:
+            r = self.client.cancel_order(symbol, ord_id)
+        except OkxAuthError as e:
+            log.warning("OKX iptal hatası %s #%d: %s", symbol, setup_id, e)
+            return False
+        if str(r.get("sCode", "")) != "0":
+            # İptal başarısız → büyük ihtimal arada doldu; doğrula, filled işaretle
+            try:
+                if self.client.order_state(symbol, ord_id).get("state") == "filled":
+                    self.store._conn.execute(
+                        "UPDATE okx_trades SET state='filled' WHERE setup_id=? "
+                        "AND state='live'", (setup_id,))
+            except OkxAuthError:
+                pass
+            log.info("OKX iptal atlandı #%d %s (sCode=%s %s)",
+                     setup_id, symbol, r.get("sCode"), r.get("sMsg"))
+            return False
+        self.store._conn.execute(
+            "UPDATE okx_trades SET state='canceled', closed_at=? "
+            "WHERE setup_id=? AND closed_at IS NULL", (now, setup_id))
+        log.info("OKX CANCEL: #%d %s emir dolmadan setup çözüldü → iptal (margin serbest)",
+                 setup_id, symbol)
+        return True
+
+    def cancel_if_unfilled(self, setup_id: int) -> bool:
+        """Setup terminal duruma (TP/STOP/ZI/EO) geçti — OKX limit emrimiz hâlâ
+        DOLMADIYSA iptal et. Dolduysa (pozisyon) dokunma, sync kapanışı yönetir.
+
+        Senaryo: agresif giriş → tespitte AKTIF + limit emir. Fiyat entry'ye dönmeden
+        TP/SL'e gidince setup terminal olur ama limit dolmamıştır → öksüz emir parkta
+        margin/parite kilitler. Bu onu temizler. Worker terminal geçişte çağırır.
+        """
+        with self._lock:
+            row = self.store._conn.execute(
+                "SELECT symbol, ord_id, state FROM okx_trades "
+                "WHERE setup_id=? AND closed_at IS NULL", (setup_id,)).fetchone()
+            if row is None:
+                return False
+            symbol, ord_id, state = row
+            if state != "live":
+                return False   # zaten dolmuş (pozisyon) → sync kapatır
+            return self._cancel_unfilled(symbol, ord_id, setup_id,
+                                         int(time.time() * 1000))
+
     def sync(self) -> int:
         """Açık OKX trade'leri OKX'ten senkronla.
 
         1) Emir hâlâ live/canceled mı? canceled → kapat.
-        2) Pozisyon kapanmış mı? P&L'i positions-history realizedPnl ile (posId/
+        2) Dolmamış limit + setup terminal (TP/STOP/ZI/EO) → öksüz emri iptal et.
+        3) Pozisyon kapanmış mı? P&L'i positions-history realizedPnl ile (posId/
            clOrdId benzersiz eşleştirme); o bulunamazsa kendi entry/exit'ten hesapla.
         """
         with self._lock:
@@ -357,6 +422,16 @@ class OkxDemoEngine:
                         (now, sid))
                     updated += 1
                     continue
+                # Öksüz limit temizliği (backstop): emir hâlâ dolmadı (live) ama
+                # setup terminal'e geçtiyse (TP/STOP/ZI/EO) → iptal et. Worker'ın
+                # terminal geçişte kaçırdığı/sessiz backfill durumlarını da yakalar.
+                if (state == "live" and ostate not in ("filled", "partially_filled")
+                        and inst not in open_pos):
+                    life = self.store.get_lifecycle(sid)
+                    if life is not None and life["state"] in TERMINAL_STATES:
+                        if self._cancel_unfilled(symbol, ord_id, sid, now, ostate):
+                            updated += 1
+                            continue
                 if ostate == "filled" and state == "live":
                     self.store._conn.execute(
                         "UPDATE okx_trades SET state='filled' WHERE setup_id=?", (sid,))
