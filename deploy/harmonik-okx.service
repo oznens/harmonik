@@ -1,0 +1,33 @@
+[Unit]
+Description=harmonik OKX demo trade hattı (paper'a paralel, gerçek demo emirleri)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=harmonik
+WorkingDirectory=/home/harmonik/harmonik-okx
+Environment=PYTHONUNBUFFERED=1
+# OKX DEMO trading API kimliği (Personal Center → Demo Trading → Demo Trading API)
+# BUNLARI DOLDUR:
+Environment=OKX_API_KEY=DOLDUR
+Environment=OKX_SECRET=DOLDUR
+Environment=OKX_PASSPHRASE=DOLDUR
+ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_demo \
+    --combos-file config/tracked_combos.txt \
+    --poll-seconds 60 \
+    --stagger-ms 300 \
+    --sync-seconds 30 \
+    --risk 20 \
+    --max-lever 50 \
+    --log-level INFO
+Restart=on-failure
+RestartSec=10
+# 600 worker × httpx client → yüksek dosya limiti şart (paper ile aynı)
+TasksMax=2000
+LimitNOFILE=65536
+StandardOutput=append:/var/log/harmonik/okx.log
+StandardError=append:/var/log/harmonik/okx.err
+
+[Install]
+WantedBy=multi-user.target
