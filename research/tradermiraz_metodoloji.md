@@ -128,6 +128,36 @@ trend filtresi (yön ELEME — bkz §2.5), momentum onayı, 0.5 seviyesi ikincil
 Kaynak: coinotag.com/2618-formasyonu-nedir-nasil-kullanilir (HTTP doğrulandı,
 2026-05-30). Detektör R:R ~1.618 (0.618/0.382 geometrisi).
 
+## 9) BEKLEYEN KARARLAR (gelecekte tekrar bakılacak)
+
+### 9.1 PaMonic (OB@D) → 200 örneklemde tekrar değerlendir ⏳
+**Durum:** PaMonic dedektörü (`terminal/quality/pamonic.py`) + geçmiş analiz aracı
+(`terminal/cli/pamonic_gecmis.py`) hazır. Canlıya KATILMADI (kullanıcı kararı:
+"şimdilik bırak, 200 örneklem gelince bak").
+
+**İlk ölçüm (2026-05-30, 40 sonuçlanmış paper işlemi):**
+- Tümü: 40 işlem, %62.5 WR, +71.66$
+- PaMonic VAR: 16 işlem, %68.8 WR, **+70.53$ (toplam kârın %98'i!)**
+- PaMonic YOK: 24 işlem, %58.3 WR, +1.13$ (çok işlem, ~sıfır kâr)
+- Pattern: 1.27 AB=CD %70→%86, Gartley %50→%60, Bat %33→%33 (etkisiz)
+
+**Sonuç:** Umut verici (kâr OB'li işlemlerde yoğun) AMA örneklem KÜÇÜK — %6.2 WR
+farkı 40 işlemde istatistiksel kesin değil.
+
+**KARAR KURALI:** Paper geçmişi **≥200 sonuçlanmış işleme** ulaşınca analizi
+tekrar çalıştır:
+```bash
+cp /home/harmonik/harmonik/data/terminal.db /tmp/analiz.db
+./venv/bin/python -m terminal.cli.pamonic_gecmis --db /tmp/analiz.db
+rm /tmp/analiz.db
+```
+- PaMonic WR hâlâ belirgin yüksek + kâr konsantrasyonu sürüyorsa → **Shadow mod**
+  (canlıda hesapla+göster, engelleme; daha da büyük örneklemle teyit) → sonra enforce.
+- Fark erimişse → küçük örneklem yanılsamasıydı, bırak.
+
+**Pusula notu:** Doğrudan ENFORCE (PaMonic yoksa girme) küçük örneklemde riskli;
+işlem sayısını %40'a düşürür. tradermiraz'ın yolu da "önce gözlemle". Shadow > Enforce.
+
 ---
 
 *Bu döküm yaşayan bir belgedir; yeni tweet/analiz geldikçe güncellenir.*
