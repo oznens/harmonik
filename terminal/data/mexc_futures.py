@@ -48,8 +48,48 @@ _INTERVAL_MAP = {
 # Saniye cinsinden mapping (pagination için)
 _INTERVAL_SECONDS = {
     "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-    "60m": 3600, "4h": 14400, "1d": 86400, "1W": 604800,
+    "60m": 3600, "2h": 7200, "4h": 14400, "8h": 28800,
+    "1d": 86400, "1W": 604800,
 }
+
+# MEXC native DESTEKLEMEYEN aralıklar → (alt_aralık, kaç_tanesi) ile resample.
+# 2h native yok (Min60'tan sonra Hour4 geliyor) → 60m mumları 2'şerli birleştir.
+_RESAMPLE_FROM: dict[str, tuple[str, int]] = {
+    "2h": ("60m", 2),
+}
+
+
+def _resample(base: list[dict[str, Any]], factor: int, out_sec: int) -> list[dict[str, Any]]:
+    """`factor` adet alt-mumu tek üst-muma birleştir (OHLCV).
+
+    Üst mumlar zaman sınırına HİZALANIR (örn. 2h → 00:00, 02:00 ...): grup,
+    open_time'ın out_sec'e bölümünün tabanına göre yapılır. Eksik (yarım) son
+    grup da döner — close_time gelecekte kaldığından poller onu 'kapanmamış'
+    sayar (forming bar), tam dolunca kapanmış olur.
+    """
+    if factor <= 1 or not base:
+        return base
+    out_ms = out_sec * 1000
+    buckets: dict[int, list[dict[str, Any]]] = {}
+    for k in base:
+        key = (k["open_time"] // out_ms) * out_ms   # hizalanmış üst-mum başlangıcı
+        buckets.setdefault(key, []).append(k)
+    merged: list[dict[str, Any]] = []
+    for start in sorted(buckets):
+        grp = sorted(buckets[start], key=lambda x: x["open_time"])
+        qv = [g.get("quote_volume") for g in grp]
+        merged.append({
+            "open_time": start,
+            "close_time": start + out_ms - 1,
+            "open": grp[0]["open"],
+            "high": max(g["high"] for g in grp),
+            "low": min(g["low"] for g in grp),
+            "close": grp[-1]["close"],
+            "volume": sum(g.get("volume", 0.0) for g in grp),
+            "quote_volume": (sum(v for v in qv if v is not None)
+                             if any(v is not None for v in qv) else None),
+        })
+    return merged
 
 
 def _spot_to_futures_symbol(symbol: str) -> str:
@@ -98,6 +138,13 @@ class MexcFuturesClient:
         Returns: list[dict] — open_time, close_time, open, high, low, close,
         volume, quote_volume keys. Spot ile uyumlu.
         """
+        # Native desteklenmeyen aralık (örn. 2h) → alt aralığı çekip resample et.
+        if interval in _RESAMPLE_FROM:
+            base_iv, factor = _RESAMPLE_FROM[interval]
+            base = self.klines(symbol, base_iv, limit=limit * factor + factor)
+            out = _resample(base, factor, _INTERVAL_SECONDS[interval])
+            return out[-limit:]
+
         fut_symbol = _spot_to_futures_symbol(symbol)
         fut_interval = _INTERVAL_MAP.get(interval)
         if fut_interval is None:
@@ -155,6 +202,15 @@ class MexcFuturesClient:
 
         Spot client ile aynı interface — drop-in replacement.
         """
+        # Native desteklenmeyen aralık (örn. 2h) → alt aralığı sayfalı çek + resample.
+        if interval in _RESAMPLE_FROM:
+            base_iv, factor = _RESAMPLE_FROM[interval]
+            base = self.klines_paginated(symbol, base_iv, total_bars * factor + factor,
+                                         end_time_ms=end_time_ms, throttle=throttle,
+                                         max_empty_pages=max_empty_pages)
+            out = _resample(base, factor, _INTERVAL_SECONDS[interval])
+            return out[-total_bars:]
+
         fut_symbol = _spot_to_futures_symbol(symbol)
         fut_interval = _INTERVAL_MAP.get(interval)
         if fut_interval is None:

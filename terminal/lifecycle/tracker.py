@@ -363,5 +363,6 @@ class LifecycleTracker:
     def _interval_ms(self) -> int:
         # Aralık → ms eşlemesi (config'deki ile aynı). Basit harita.
         m = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
-             "60m": 3_600_000, "4h": 14_400_000, "1d": 86_400_000, "1W": 604_800_000}
+             "60m": 3_600_000, "2h": 7_200_000, "4h": 14_400_000, "8h": 28_800_000,
+             "1d": 86_400_000, "1W": 604_800_000}
         return m.get(self.interval, 3_600_000)

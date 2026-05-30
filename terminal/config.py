@@ -45,7 +45,7 @@ INTERVAL_ALIASES = {
     "1h": "60m",
 }
 
-VALID_INTERVALS = {"1m", "5m", "15m", "30m", "60m", "4h", "1d", "1W", "1M"}
+VALID_INTERVALS = {"1m", "5m", "15m", "30m", "60m", "2h", "4h", "8h", "1d", "1W", "1M"}
 
 INTERVAL_SECONDS = {
     "1m": 60,

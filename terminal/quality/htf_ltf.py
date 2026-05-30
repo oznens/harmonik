@@ -15,7 +15,9 @@ HTF_MAPPING: dict[str, str] = {
     "15m": "60m",
     "30m": "4h",
     "60m": "4h",
+    "2h":  "8h",   # 4× (multi-TF 4-6× kuralı); 8h native Hour8
     "4h":  "1d",
+    "8h":  "1d",
     "1d":  "1W",
 }
 
