@@ -554,6 +554,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Paper trade başlangıç sermayesi USD (default 1000).")
     parser.add_argument("--paper-risk", type=float, default=20.0,
                         help="Paper trade başına risk USD (default 20).")
+    parser.add_argument("--paper-entry-slippage", type=float, default=0.0002,
+                        help="Giriş slippage oranı (varsayılan %0.02; 0=kapalı).")
+    parser.add_argument("--paper-stop-slippage", type=float, default=0.0005,
+                        help="STOP market slippage oranı (varsayılan %0.05; 0=kapalı).")
     parser.add_argument("--include-elenen", action="store_true")
     parser.add_argument("--no-potential", action="store_true",
                         help="Potansiyel (oluşmamış) pattern bildirimlerini kapat. "
