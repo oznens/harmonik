@@ -307,8 +307,8 @@ def test_sync_closes_on_history_pnl(store):
     assert abs(row[1] - expect) < 1.0        # realizedPnl kendi hesapla uyumlu
 
 
-def test_sync_rejects_wrong_pnl(store):
-    """realizedPnl kendi hesaptan ÇOK saparsa (yanlış eşleşme) kendi hesabı kullanılır."""
+def test_sync_rejects_impossible_pnl(store):
+    """|realizedPnl| > notional (imkansız, eski -601 birikme artığı) → kendi hesabı."""
     s, sid = _setup(store)
     fake = _FakeOkx()
     eng = OkxDemoEngine(store, fake, _fake_instruments())
@@ -317,15 +317,37 @@ def test_sync_rejects_wrong_pnl(store):
     fake.positions = lambda: []
     exit_px = round(t.entry_px * 0.99, 6)   # %1 düşüş → bull SL, ~-risk
     calc = eng._calc_pnl(t.direction, t.entry_px, exit_px, t.notional_usd)
-    # OKX yanlış olarak -601 raporluyor (başka pozisyonun zararı eşleşmiş)
+    # notional'ı kat kat aşan imkansız değer (yanlış eşleşme) → reddet
+    impossible = -(t.notional_usd * 10)
     fake.positions_history = lambda: [{"instId": "TEST-USDT-SWAP",
-                                       "realizedPnl": "-601",
+                                       "realizedPnl": str(impossible),
                                        "closeAvgPx": str(exit_px)}]
     eng.sync()
     pnl = store._conn.execute(
         "SELECT pnl_usd FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()[0]
-    # -601'i REDDEDİP kendi hesabını (calc, ~-risk) kullanmalı
-    assert abs(pnl - calc) < 1.0 and pnl > -100
+    assert abs(pnl - calc) < 1.0          # imkansızı reddedip kendi hesabını aldı
+
+
+def test_sync_keeps_real_large_loss(store):
+    """KRİTİK: gerçek büyük zarar (notional içinde, slippage/gap) REDDEDİLMEZ.
+    Eski %50-sapma mantığı bunu sahte-iyimsere çeviriyordu (-176 gerçek → -20 DB)."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    t = eng.open_trade(s, sid, s.detected_at)
+    fake.orders[t.ord_id]["state"] = "filled"
+    fake.positions = lambda: []
+    exit_px = round(t.entry_px * 0.99, 6)
+    # OKX gerçek zararı: $20 'ideal'in çok üstünde ama notional içinde (gap/slippage)
+    real_loss = -min(t.notional_usd * 0.5, t.notional_usd - 1)
+    fake.positions_history = lambda: [{"instId": "TEST-USDT-SWAP",
+                                       "clOrdId": t.cl_ord_id,
+                                       "realizedPnl": str(round(real_loss, 4)),
+                                       "closeAvgPx": str(exit_px)}]
+    eng.sync()
+    pnl = store._conn.execute(
+        "SELECT pnl_usd FROM okx_trades WHERE setup_id=?", (sid,)).fetchone()[0]
+    assert abs(pnl - real_loss) < 1.0     # GERÇEK zararı olduğu gibi kaydetti
 
 
 def test_summary(store):

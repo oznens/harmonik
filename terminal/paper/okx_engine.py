@@ -479,26 +479,30 @@ class OkxDemoEngine:
                         "UPDATE okx_trades SET state='filled' WHERE setup_id=?", (sid,))
                 # Pozisyon kapandı mı: artık açık değil + emir filled olmuştu
                 if inst not in open_pos and ostate in ("filled", ""):
-                    # Bu emre ait history kaydı: instId eşleşen (clOrdId varsa onunla
-                    # önceliklendir). realizedPnl'i KENDİ hesabımız doğrular → yanlış
-                    # eşleşme (aynı parite çok kapanış) zararı engellenir.
+                    # Bu emre ait kapanış kaydı. Parite-tek guard sayesinde aynı anda
+                    # paritede tek pozisyon var → instId eşleşmesi güvenilir (clOrdId
+                    # varsa öncelik). GERÇEK realizedPnl'e OLDUĞU GİBİ güven — borsanın
+                    # gerçek sonucu (slippage/gap/likidasyon dahil). Eski "%50 sapma →
+                    # kendi hesabı" mantığı KALDIRILDI: gerçek zararı reddedip P&L'i
+                    # sahte-iyimser yapıyordu (-661 gerçek, +674 DB). Sadece İMKANSIZ
+                    # değere (|pnl|>notional, eski -601 birikme bug'ı — artık çözüldü)
+                    # karşı kendi hesabımıza düş.
                     cands = [x for x in hist_list if x.get("instId") == inst]
                     h = next((x for x in cands if x.get("clOrdId") == cl_ord_id), None) \
                         or (cands[-1] if cands else None)
                     pnl = None
                     exit_px = None
                     if h is not None:
-                        # realizedPnl o paritenin bu kapanışına ait — ama emin değilsek
-                        # kendi hesabımızla DOĞRULA (sapma büyükse kendi hesabı kullan)
                         rp = float(h.get("realizedPnl") or 0)
                         exit_px = float(h.get("closeAvgPx") or 0) or None
-                        if exit_px:
-                            calc = self._calc_pnl(direction, entry_px, exit_px, notional)
-                            # realizedPnl ile kendi hesabımız uyuşuyorsa onu kullan,
-                            # büyük sapma varsa (yanlış eşleşme) kendi hesabımızı al
-                            pnl = rp if abs(rp - calc) < abs(calc) * 0.5 + 1 else calc
+                        if notional > 0 and abs(rp) > notional:
+                            # İmkansız (yanlış eşleşme/birikme artığı) → kendi hesabı
+                            pnl = (self._calc_pnl(direction, entry_px, exit_px, notional)
+                                   if exit_px else None)
+                            if pnl is None:
+                                pnl = rp
                         else:
-                            pnl = rp
+                            pnl = rp     # gerçek borsa sonucu
                     if pnl is None:
                         # history yok → entry/exit bilinmiyor; risk tabanlı tahmin yok,
                         # ZI (sonuçsuz) bırak, bir sonraki sync'te tekrar dene
