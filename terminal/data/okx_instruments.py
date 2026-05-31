@@ -14,6 +14,7 @@ import logging
 import math
 import threading
 import time
+from decimal import ROUND_DOWN, Decimal
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,10 +36,16 @@ class Instrument:
     tick_sz: float       # fiyat adımı
 
     def round_sz(self, sz: float) -> float:
-        """Kontrat adedini lot adımına yuvarla (aşağı)."""
+        """Kontrat adedini lot adımına yuvarla (aşağı).
+
+        Decimal: float floor(sz/lot)*lot ondalık lotSz'de (PEPE 0.1) hatalı kuyruk
+        üretiyordu (0.3 yerine 0.30000000000000004) → OKX 51121 'lot katı değil'.
+        """
         if self.lot_sz <= 0:
             return sz
-        return math.floor(sz / self.lot_sz) * self.lot_sz
+        d_lot = Decimal(str(self.lot_sz))
+        steps = (Decimal(str(sz)) / d_lot).to_integral_value(rounding=ROUND_DOWN)
+        return float(steps * d_lot)
 
     def round_px(self, px: float) -> float:
         if self.tick_sz <= 0:

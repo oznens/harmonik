@@ -22,6 +22,23 @@ def test_round_sz_and_px():
     assert inst.round_px(74000.07) == 74000.1
 
 
+def test_round_sz_decimal_lot_no_float_tail():
+    """51121 fix: ondalık lotSz (PEPE 0.1) float-kuyruk üretmemeli.
+    Eski floor(sz/lot)*lot → 0.30000000000000004 → OKX 'lot katı değil' reddi."""
+    from terminal.paper.okx_engine import OkxDemoEngine
+    inst = Instrument("PEPE-USDT-SWAP", ct_val=1e7, max_lever=50,
+                      min_sz=0.1, lot_sz=0.1, tick_sz=1e-9)
+    # float bug'ı tetikleyen ham boyut
+    r = inst.round_sz(0.3066)
+    assert r == 0.3
+    assert OkxDemoEngine._px(r) == "0.3"     # temiz string, kuyruk yok
+    # lot katı garantisi (Decimal)
+    from decimal import Decimal
+    for raw in (0.3066, 3.34, 100.05, 7.77):
+        s = OkxDemoEngine._px(inst.round_sz(raw))
+        assert Decimal(s) % Decimal("0.1") == 0
+
+
 def test_sizing_basic_btc_aggressive():
     """Varsayılan (aggressive): max kaldıraç → margin minimum (az parayla çok poz)."""
     inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)

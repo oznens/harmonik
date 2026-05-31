@@ -297,15 +297,16 @@ class OkxDemoEngine:
 
             self.client.set_leverage(setup.symbol, sizing.leverage)
             try:
+                sz_str = self._px(sizing.sz)   # float-kuyruk/bilim notasyonu yok (51121)
                 if self.entry_type == "market":
                     # Paper gibi anında dol — setup AKTIF olunca girilir. px yok.
                     r = self.client.place_order(
-                        setup.symbol, side=side, sz=str(sizing.sz), ord_type="market",
+                        setup.symbol, side=side, sz=sz_str, ord_type="market",
                         tp_trigger=self._px(tp_px), sl_trigger=self._px(sl_px),
                         cl_ord_id=cl_id)
                 else:
                     r = self.client.place_order(
-                        setup.symbol, side=side, sz=str(sizing.sz), ord_type="limit",
+                        setup.symbol, side=side, sz=sz_str, ord_type="limit",
                         px=self._px(entry_px), tp_trigger=self._px(tp_px),
                         sl_trigger=self._px(sl_px), cl_ord_id=cl_id)
             except OkxAuthError as e:
