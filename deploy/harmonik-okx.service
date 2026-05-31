@@ -19,9 +19,9 @@ Environment=OKX_PASSPHRASE=DOLDUR
 # notional'a göre). max-notional 6000: aşırı dar stopları ele. paper-stili
 # (pamonic YOK). max-open YOK: poz sayısı boş USDT'ye (canlı availBal) göre
 # doğal sınırlanır — bakiye oldukça açar, bitince durur (51008 önlenir).
-# entry-type limit: SADECE fiyat bizim D seviyesine gelirse gir (gerçek harmonik
-# giriş, ideal fiyat). Market kovalama -661$/WR43 ettirdi; limit = doldukça temiz
-# giriş. Çoğu setup dolmaz (cancel) — bu doğru davranış, kötü fiyattan girme.
+# Giriş: KOD DEFAULT artık limit (sadece fiyat D seviyesine gelirse gir, ideal
+# harmonik fiyat). Market kovalama -661$/WR43 ettirdi. Flag gerekmez; market
+# istenirse --entry-type market eklenir.
 ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_demo \
     --combos-file config/tracked_combos.txt \
     --poll-seconds 60 \
@@ -30,7 +30,6 @@ ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_de
     --risk 20 \
     --target-margin 30 \
     --max-notional 6000 \
-    --entry-type limit \
     --log-level INFO
 Restart=on-failure
 RestartSec=10

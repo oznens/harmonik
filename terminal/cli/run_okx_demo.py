@@ -157,10 +157,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min-free", type=float, default=0.0,
                     help="İşlem sonrası boşta tutulacak min USDT tamponu (0=tümünü "
                          "kullan). Boş USDT < margin+tampon ise açma.")
-    ap.add_argument("--entry-type", choices=["market", "limit"], default="market",
-                    help="market (paper gibi anında dol, setup AKTIF olunca gir → "
-                         "kazanan sıçrayışlar kaçmaz) | limit (entry'ye fiyat dönerse "
-                         "dol; harmonik dönüşte çoğu dolmaz → cancel yığını).")
+    ap.add_argument("--entry-type", choices=["market", "limit"], default="limit",
+                    help="limit (DEFAULT — sadece fiyat D seviyesine gelirse gir, "
+                         "ideal harmonik fiyat; market kovalama -661 USD/WR43 ettirdi) | "
+                         "market (setup AKTIF olunca canlı fiyattan anında dol).")
     ap.add_argument("--pamonic", action="store_true",
                     help="PaMonic modu: OB yoksa pas geç (enforce), OB varsa dar "
                          "stop (OB arkası) + yapısal TP. OB filtreli A/B testi.")

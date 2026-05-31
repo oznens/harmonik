@@ -113,7 +113,7 @@ def test_market_skips_when_price_past_tp(store):
     hareket) emir atma — OKX TP'yi son fiyata göre kontrol eder."""
     s, sid = _setup(store)
     fake = _FakeOkx()
-    eng = OkxDemoEngine(store, fake, _fake_instruments())   # market default
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), entry_type="market")
     # Bull setup: canlı son fiyat TP'nin ÜSTÜNDE → TP yanlış tarafta (tükenmiş)
     kl = [{"open_time": 1, "open": 1, "high": 1, "low": 1,
            "close": s.tp1 * 1.05}]               # fiyat TP'yi geçmiş
@@ -126,7 +126,7 @@ def test_market_opens_when_price_in_range(store):
     """Canlı fiyat SL/TP aralığındaysa (sağlıklı) market emir atılır."""
     s, sid = _setup(store)
     fake = _FakeOkx()
-    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), entry_type="market")
     kl = [{"open_time": 1, "open": 1, "high": 1, "low": 1,
            "close": s.entry}]                     # tam entry'de → aralık içi
     t = eng.open_trade(s, sid, s.detected_at, klines=kl)
@@ -134,27 +134,28 @@ def test_market_opens_when_price_in_range(store):
     assert fake.placed[0]["ord_type"] == "market"
 
 
-def test_default_entry_is_market(store):
-    """Varsayılan market: paper gibi anında dol (px yok, ordType=market)."""
+def test_default_entry_is_limit(store):
+    """Varsayılan limit: ideal harmonik fiyattan gir (ordType=limit + px).
+    Market kovalama -661 USD/WR43 ettirdi → default limit'e çevrildi."""
     s, sid = _setup(store)
     fake = _FakeOkx()
     eng = OkxDemoEngine(store, fake, _fake_instruments())   # default entry_type
     eng.open_trade(s, sid, s.detected_at)
     p = fake.placed[0]
-    assert p["ord_type"] == "market"
-    assert p["px"] is None                       # market'te limit fiyatı gitmez
+    assert p["ord_type"] == "limit"
+    assert p["px"] is not None                   # limit fiyatı (D seviyesi) gider
     assert p["tp"] is not None and p["sl"] is not None
 
 
-def test_limit_entry_sends_price(store):
-    """entry_type=limit: ordType=limit + px gönderir (eski davranış)."""
+def test_market_entry_explicit(store):
+    """entry_type=market: ordType=market, px gönderilmez (opt-in)."""
     s, sid = _setup(store)
     fake = _FakeOkx()
-    eng = OkxDemoEngine(store, fake, _fake_instruments(), entry_type="limit")
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), entry_type="market")
     eng.open_trade(s, sid, s.detected_at)
     p = fake.placed[0]
-    assert p["ord_type"] == "limit"
-    assert p["px"] is not None
+    assert p["ord_type"] == "market"
+    assert p["px"] is None
 
 
 def test_skips_if_okx_already_has_position(store):

@@ -69,7 +69,7 @@ class OkxDemoEngine:
                  pamonic: bool = False, max_open: int = 0,
                  fixed_leverage: int = 0, max_notional: float = 0.0,
                  target_margin: float = 0.0, min_free_usdt: float = 0.0,
-                 entry_type: str = "market") -> None:
+                 entry_type: str = "limit") -> None:
         """pamonic=True: PaMonic modu — OB yoksa pas geç (enforce), OB varsa
         stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef).
         entry_type: "market" (paper gibi anında dol — setup AKTIF olunca girilir,
