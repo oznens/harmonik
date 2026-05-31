@@ -168,8 +168,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
 
-    logging.basicConfig(level=args.log_level.upper(),
-                        format="%(asctime)s [%(levelname)s] %(message)s")
+    # INFO/DEBUG → stdout (okx.log), WARNING+ → stderr (okx.err). Böylece .err
+    # sadece GERÇEK sorunları (ret/çökme) tutar, normal akış .log'a gider.
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    h_out = logging.StreamHandler(sys.stdout)
+    h_out.setFormatter(fmt)
+    h_out.addFilter(lambda rec: rec.levelno < logging.WARNING)   # sadece <WARNING
+    h_err = logging.StreamHandler(sys.stderr)
+    h_err.setFormatter(fmt)
+    h_err.setLevel(logging.WARNING)                              # WARNING ve üstü
+    root = logging.getLogger()
+    root.setLevel(args.log_level.upper())
+    root.handlers[:] = [h_out, h_err]
     for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
