@@ -67,9 +67,13 @@ class OkxDemoEngine:
                  max_lever: int = MAX_USER_LEVER,
                  pamonic: bool = False, max_open: int = 0,
                  fixed_leverage: int = 0, max_notional: float = 0.0,
-                 target_margin: float = 0.0, min_free_usdt: float = 0.0) -> None:
+                 target_margin: float = 0.0, min_free_usdt: float = 0.0,
+                 entry_type: str = "market") -> None:
         """pamonic=True: PaMonic modu — OB yoksa pas geç (enforce), OB varsa
         stop'u OB arkasına çek (dar) + TP yapısal (tp2=A harmonik hedef).
+        entry_type: "market" (paper gibi anında dol — setup AKTIF olunca girilir,
+        kazanan sıçrayışlar kaçmaz) veya "limit" (entry'ye fiyat geri dönerse dol;
+        çoğu harmonik dönüşte dolmaz → cancel yığını). Paper market kullanır.
         max_open: aynı anda max açık pozisyon (0=sınırsız) — margin tükenmesini
         (51008) önler. 0 ise sınır YOK: pozisyon sayısı boş USDT'ye göre doğal
         sınırlanır (her açılışta canlı availBal kapısı uygulanır).
@@ -85,6 +89,7 @@ class OkxDemoEngine:
         self.initial_equity = initial_equity
         self.max_lever = max_lever
         self.pamonic = pamonic
+        self.entry_type = "market" if entry_type == "market" else "limit"
         self.max_open = max_open
         self.fixed_leverage = fixed_leverage
         self.max_notional = max_notional
@@ -273,10 +278,16 @@ class OkxDemoEngine:
 
             self.client.set_leverage(setup.symbol, sizing.leverage)
             try:
-                r = self.client.place_order(
-                    setup.symbol, side=side, sz=str(sizing.sz), ord_type="limit",
-                    px=str(entry_px), tp_trigger=str(tp_px), sl_trigger=str(sl_px),
-                    cl_ord_id=cl_id)
+                if self.entry_type == "market":
+                    # Paper gibi anında dol — setup AKTIF olunca girilir. px yok.
+                    r = self.client.place_order(
+                        setup.symbol, side=side, sz=str(sizing.sz), ord_type="market",
+                        tp_trigger=str(tp_px), sl_trigger=str(sl_px), cl_ord_id=cl_id)
+                else:
+                    r = self.client.place_order(
+                        setup.symbol, side=side, sz=str(sizing.sz), ord_type="limit",
+                        px=str(entry_px), tp_trigger=str(tp_px), sl_trigger=str(sl_px),
+                        cl_ord_id=cl_id)
             except OkxAuthError as e:
                 log.warning("OKX emir hatası %s: %s", setup.symbol, e)
                 return None
@@ -293,9 +304,9 @@ class OkxDemoEngine:
                 (setup_id, setup.symbol, setup.interval, setup.pattern_name,
                  setup.direction, ord_id, cl_id, entry_px, sl_px, tp_px,
                  sizing.sz, sizing.leverage, sizing.notional_usd, opened_at))
-            log.info("OKX OPEN: %s %s %s sz=%s lev=%dx entry=%.6g TP=%.6g SL=%.6g ord=%s",
-                     setup.symbol, setup.interval, setup.pattern_name, sizing.sz,
-                     sizing.leverage, entry_px, tp_px, sl_px, ord_id)
+            log.info("OKX OPEN(%s): %s %s %s sz=%s lev=%dx entry=%.6g TP=%.6g SL=%.6g ord=%s",
+                     self.entry_type, setup.symbol, setup.interval, setup.pattern_name,
+                     sizing.sz, sizing.leverage, entry_px, tp_px, sl_px, ord_id)
             return OkxTrade(
                 setup_id=setup_id, symbol=setup.symbol, interval=setup.interval,
                 pattern=setup.pattern_name, direction=setup.direction,

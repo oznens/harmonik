@@ -35,7 +35,8 @@ class _FakeOkx:
         oid = str(self.next_id); self.next_id += 1
         self.orders[oid] = {"state": "live", "instId": symbol}
         self.placed.append({"symbol": symbol, "side": side, "sz": sz, "px": px,
-                            "tp": tp_trigger, "sl": sl_trigger, "ordId": oid})
+                            "ord_type": ord_type, "tp": tp_trigger, "sl": sl_trigger,
+                            "ordId": oid})
         return {"ordId": oid, "sCode": "0", "sMsg": "ok"}
 
     def order_state(self, symbol, ord_id):
@@ -87,6 +88,29 @@ def test_open_trade_places_order(store):
     assert p["symbol"] == "TESTUSDT" and p["side"] == "buy"   # gartley_bull → long
     assert p["tp"] is not None and p["sl"] is not None        # TP/SL iliştirildi
     assert len(eng.open_positions()) == 1
+
+
+def test_default_entry_is_market(store):
+    """Varsayılan market: paper gibi anında dol (px yok, ordType=market)."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())   # default entry_type
+    eng.open_trade(s, sid, s.detected_at)
+    p = fake.placed[0]
+    assert p["ord_type"] == "market"
+    assert p["px"] is None                       # market'te limit fiyatı gitmez
+    assert p["tp"] is not None and p["sl"] is not None
+
+
+def test_limit_entry_sends_price(store):
+    """entry_type=limit: ordType=limit + px gönderir (eski davranış)."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), entry_type="limit")
+    eng.open_trade(s, sid, s.detected_at)
+    p = fake.placed[0]
+    assert p["ord_type"] == "limit"
+    assert p["px"] is not None
 
 
 def test_skips_if_okx_already_has_position(store):

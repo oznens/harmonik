@@ -157,6 +157,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min-free", type=float, default=0.0,
                     help="İşlem sonrası boşta tutulacak min USDT tamponu (0=tümünü "
                          "kullan). Boş USDT < margin+tampon ise açma.")
+    ap.add_argument("--entry-type", choices=["market", "limit"], default="market",
+                    help="market (paper gibi anında dol, setup AKTIF olunca gir → "
+                         "kazanan sıçrayışlar kaçmaz) | limit (entry'ye fiyat dönerse "
+                         "dol; harmonik dönüşte çoğu dolmaz → cancel yığını).")
     ap.add_argument("--pamonic", action="store_true",
                     help="PaMonic modu: OB yoksa pas geç (enforce), OB varsa dar "
                          "stop (OB arkası) + yapısal TP. OB filtreli A/B testi.")
@@ -206,7 +210,8 @@ def main(argv: list[str] | None = None) -> int:
                            risk_per_trade=args.risk, max_lever=args.max_lever,
                            pamonic=args.pamonic, max_open=args.max_open,
                            fixed_leverage=args.leverage, max_notional=args.max_notional,
-                           target_margin=args.target_margin, min_free_usdt=args.min_free)
+                           target_margin=args.target_margin, min_free_usdt=args.min_free,
+                           entry_type=args.entry_type)
 
     log.info("OKX hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s",
              len(combos), args.poll_seconds, args.sync_seconds, args.pamonic)
