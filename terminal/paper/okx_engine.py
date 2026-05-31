@@ -509,7 +509,34 @@ class OkxDemoEngine:
                         (round(pnl, 4), exit_px, now, sid))
                     log.info("OKX CLOSE: %s setup#%d realizedPnl=%.4f", symbol, sid, pnl)
                     updated += 1
+
+            # ÖKSÜZ OCO temizliği: pozisyon kapanınca (TP/SL biri tetiklenince OCO
+            # zaten gider, ama elle 'Close all' ya da eski birikme sonrası) açık
+            # pozisyonu OLMAYAN iliştirilmiş TP/SL emirleri parkta kalabiliyor →
+            # margin/parite kilitler. Pozisyonsuz OCO'ları iptal et.
+            updated += self._cleanup_orphan_algos(open_pos)
             return updated
+
+    def _cleanup_orphan_algos(self, open_pos: set) -> int:
+        """Açık pozisyonu olmayan bekleyen OCO (TP/SL) emirlerini iptal et."""
+        cleaned = 0
+        try:
+            algos = self.client.algo_pending(ord_type="oco")
+        except (OkxAuthError, AttributeError):
+            return 0
+        for a in algos:
+            inst = a.get("instId")
+            algo_id = a.get("algoId")
+            if not inst or not algo_id or inst in open_pos:
+                continue   # pozisyonu var → koruması geçerli, dokunma
+            try:
+                self.client.cancel_algo(inst, algo_id, ord_type="oco")
+                log.info("OKX OCO temizlik: %s öksüz TP/SL iptal (algoId=%s, pozisyon yok)",
+                         inst, algo_id)
+                cleaned += 1
+            except OkxAuthError as e:
+                log.warning("OKX OCO iptal hatası %s: %s", inst, e)
+        return cleaned
 
     def summary(self) -> dict[str, Any]:
         with self._lock:

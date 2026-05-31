@@ -51,6 +51,14 @@ class _FakeOkx:
     def cancel_order(self, symbol, ord_id):
         return {"sCode": "0"}
 
+    def algo_pending(self, ord_type="oco", inst_type="SWAP"):
+        return getattr(self, "algos", [])
+
+    def cancel_algo(self, symbol, algo_id, ord_type="oco"):
+        self.canceled_algos = getattr(self, "canceled_algos", [])
+        self.canceled_algos.append((symbol, algo_id))
+        return {"sCode": "0"}
+
 
 def _fake_instruments():
     oi = OkxInstruments.__new__(OkxInstruments)
@@ -190,6 +198,21 @@ def test_min_free_buffer_reserves_balance(store):
     t = eng.open_trade(s, sid, s.detected_at)
     assert t is None
     assert len(fake.placed) == 0
+
+
+def test_sync_cleans_orphan_oco(store):
+    """Pozisyonu olmayan bekleyen OCO (TP/SL) emirleri iptal edilir; pozisyonu
+    olanlara dokunulmaz (koruma geçerli)."""
+    fake = _FakeOkx()
+    # AAVE açık pozisyonda (OCO'su geçerli), SAND öksüz (poz yok → iptal)
+    fake.positions = lambda: [{"instId": "AAVE-USDT-SWAP", "pos": "184"}]
+    fake.algos = [{"instId": "AAVE-USDT-SWAP", "algoId": "a1"},
+                  {"instId": "SAND-USDT-SWAP", "algoId": "a2"}]
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    eng.sync()
+    canceled = getattr(fake, "canceled_algos", [])
+    assert ("SAND-USDT-SWAP", "a2") in canceled       # öksüz → iptal
+    assert ("AAVE-USDT-SWAP", "a1") not in canceled   # pozisyonlu → korundu
 
 
 def test_one_position_per_symbol(store):

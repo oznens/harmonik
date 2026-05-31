@@ -95,7 +95,8 @@ class OkxDemoClient:
             h["x-simulated-trading"] = "1"
         return h
 
-    def _request(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _request(self, method: str, path: str,
+                 body: dict | list | None = None) -> dict:
         if not self.has_credentials():
             raise OkxAuthError(
                 "OKX kimlik eksik — OKX_API_KEY / OKX_SECRET / OKX_PASSPHRASE "
@@ -189,6 +190,23 @@ class OkxDemoClient:
     def cancel_order(self, symbol: str, ord_id: str) -> dict[str, Any]:
         p = self._request("POST", "/api/v5/trade/cancel-order",
                           {"instId": _to_inst(symbol), "ordId": ord_id})
+        data = p.get("data", [{}])
+        return data[0] if data else {}
+
+    def algo_pending(self, ord_type: str = "oco",
+                     inst_type: str = "SWAP") -> list[dict[str, Any]]:
+        """Bekleyen algo (iliştirilmiş TP/SL) emirleri. ordType: oco/conditional.
+        İliştirilmiş TP/SL'ler OKX'te 'oco' algo emri olarak görünür."""
+        p = self._request(
+            "GET", f"/api/v5/trade/orders-algo-pending?instType={inst_type}"
+                   f"&ordType={ord_type}")
+        return p.get("data", [])
+
+    def cancel_algo(self, symbol: str, algo_id: str,
+                    ord_type: str = "oco") -> dict[str, Any]:
+        """Bekleyen algo emrini iptal et (öksüz TP/SL temizliği)."""
+        p = self._request("POST", "/api/v5/trade/cancel-algos",
+                          [{"instId": _to_inst(symbol), "algoId": algo_id}])
         data = p.get("data", [{}])
         return data[0] if data else {}
 
