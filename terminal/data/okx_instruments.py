@@ -115,7 +115,8 @@ class OkxInstruments:
                  aggressive_leverage: bool = True,
                  fixed_leverage: int = 0,
                  max_notional: float = 0.0,
-                 target_margin: float = 0.0) -> Sizing | None:
+                 target_margin: float = 0.0,
+                 min_lever: int = 10) -> Sizing | None:
         """$risk + kaldıraç → OKX kontrat adedi.
 
         risk = $risk_usd (SL'e değerse kaybedilecek). SL mesafesi %p.
@@ -133,6 +134,14 @@ class OkxInstruments:
         inst = self.get(symbol)
         if inst is None or inst.ct_val <= 0 or price <= 0 or entry <= 0:
             return None
+        # 51004 koruması: çok düşük max-lever'lı paritelerde (ENA/JUP demo 5x, çoğu
+        # hisse-token) OKX'in pozisyon-büyüklüğü limiti çok küçük → notional'ımız
+        # onu aşıp emir reddediliyor. Bu pariteleri ele (5x'te zaten anlamlı poz
+        # açılamaz + çoğu çöp/hisse-token).
+        if min_lever > 0 and inst.max_lever < min_lever:
+            return Sizing(0, 1, 0, 0, False,
+                          f"max kaldıraç düşük ({inst.max_lever:g}x < {min_lever}x) "
+                          f"— pozisyon limiti riski (51004), atla")
         sl_pct = abs(entry - stop) / entry
         if sl_pct <= 0:
             return Sizing(0, 1, 0, 0, False, "SL mesafesi 0")

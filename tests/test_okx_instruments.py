@@ -82,6 +82,25 @@ def test_sizing_caps_at_max_lever():
     assert s.leverage == 50      # paritenin max'ı ile sınırlı (360 değil)
 
 
+def test_sizing_skips_low_max_lever():
+    """51004 koruması: max kaldıraç min_lever altıysa atla (ENA/hisse-token demo 5x).
+    Düşük kaldıraçta OKX pozisyon limiti küçük → notional aşıp emir reddediliyordu."""
+    inst = Instrument("ENA-USDT-SWAP", 10.0, 5, 1.0, 1.0, 0.0001)   # demo 5x
+    oi = _inst_with(inst)
+    s = oi.size_for("ENAUSDT", 0.0907, 0.0890, 0.0907, risk_usd=20, equity=1000,
+                    target_margin=30)
+    assert s.ok is False and "kaldıraç düşük" in s.reason
+
+
+def test_sizing_min_lever_zero_allows_low():
+    """min_lever=0 → eşik kapalı, düşük kaldıraçlı parite de işlenir (eski davranış)."""
+    inst = Instrument("ENA-USDT-SWAP", 10.0, 5, 1.0, 1.0, 0.0001)
+    oi = _inst_with(inst)
+    s = oi.size_for("ENAUSDT", 0.0907, 0.0890, 0.0907, risk_usd=20, equity=1000,
+                    target_margin=30, min_lever=0)
+    assert s.ok is True and s.leverage <= 5
+
+
 def test_sizing_user_lever_cap():
     inst = Instrument("BTC-USDT-SWAP", 0.01, 100, 0.01, 0.01, 0.1)
     oi = _inst_with(inst)
