@@ -90,6 +90,42 @@ def test_open_trade_places_order(store):
     assert len(eng.open_positions()) == 1
 
 
+def test_px_never_scientific_notation():
+    """51000 tpTriggerPx fix: düşük fiyatlar bilimsel notasyon ÜRETMEMELİ."""
+    f = OkxDemoEngine._px
+    assert f(2.9089e-05) == "0.000029089"      # FLOKI — 'e-05' OLMAZ
+    assert "e" not in f(1e-07).lower()
+    assert f(74000.1) == "74000.1"
+    assert f(2.0) == "2"                         # sondaki .0 kırpılır
+    assert f(0.10065) == "0.10065"
+
+
+def test_market_skips_when_price_past_tp(store):
+    """51050 fix: market girişte canlı fiyat zaten TP'yi geçmişse (tükenmiş
+    hareket) emir atma — OKX TP'yi son fiyata göre kontrol eder."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())   # market default
+    # Bull setup: canlı son fiyat TP'nin ÜSTÜNDE → TP yanlış tarafta (tükenmiş)
+    kl = [{"open_time": 1, "open": 1, "high": 1, "low": 1,
+           "close": s.tp1 * 1.05}]               # fiyat TP'yi geçmiş
+    t = eng.open_trade(s, sid, s.detected_at, klines=kl)
+    assert t is None
+    assert len(fake.placed) == 0                  # tükenmiş → emir gitmedi
+
+
+def test_market_opens_when_price_in_range(store):
+    """Canlı fiyat SL/TP aralığındaysa (sağlıklı) market emir atılır."""
+    s, sid = _setup(store)
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments())
+    kl = [{"open_time": 1, "open": 1, "high": 1, "low": 1,
+           "close": s.entry}]                     # tam entry'de → aralık içi
+    t = eng.open_trade(s, sid, s.detected_at, klines=kl)
+    assert t is not None
+    assert fake.placed[0]["ord_type"] == "market"
+
+
 def test_default_entry_is_market(store):
     """Varsayılan market: paper gibi anında dol (px yok, ordType=market)."""
     s, sid = _setup(store)

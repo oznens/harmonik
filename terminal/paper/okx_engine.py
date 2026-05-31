@@ -16,6 +16,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from terminal.data.okx_instruments import OkxInstruments
@@ -276,18 +277,37 @@ class OkxDemoEngine:
                          setup.symbol, side, entry_px, sl_px, tp_px)
                 return None
 
+            # MARKET 51050 koruması: market emirde OKX iliştirilmiş TP/SL'i CANLI son
+            # fiyata göre kontrol eder (entry'ye değil). Setup AKTİF olduğu an fiyat
+            # zaten TP'yi geçmişse (tükenmiş hareket — 'Aktif → TP' aynı bar) TP yanlış
+            # tarafta kalır → 51050. Son mum kapanışını referans al; TP/SL ona göre
+            # tutarsızsa gir(me) — bu fırsat zaten kaçmış.
+            if self.entry_type == "market" and klines:
+                last_px = float(klines[-1].get("close") or 0)
+                if last_px > 0:
+                    if side == "buy":
+                        ok_live = sl_px < last_px < tp_px
+                    else:
+                        ok_live = tp_px < last_px < sl_px
+                    if not ok_live:
+                        log.info("OKX SKIP (market): %s canlı fiyat %.6g TP/SL aralığı "
+                                 "dışında (SL=%.6g TP=%.6g %s) → tükenmiş hareket, girme",
+                                 setup.symbol, last_px, sl_px, tp_px, side)
+                        return None
+
             self.client.set_leverage(setup.symbol, sizing.leverage)
             try:
                 if self.entry_type == "market":
                     # Paper gibi anında dol — setup AKTIF olunca girilir. px yok.
                     r = self.client.place_order(
                         setup.symbol, side=side, sz=str(sizing.sz), ord_type="market",
-                        tp_trigger=str(tp_px), sl_trigger=str(sl_px), cl_ord_id=cl_id)
+                        tp_trigger=self._px(tp_px), sl_trigger=self._px(sl_px),
+                        cl_ord_id=cl_id)
                 else:
                     r = self.client.place_order(
                         setup.symbol, side=side, sz=str(sizing.sz), ord_type="limit",
-                        px=str(entry_px), tp_trigger=str(tp_px), sl_trigger=str(sl_px),
-                        cl_ord_id=cl_id)
+                        px=self._px(entry_px), tp_trigger=self._px(tp_px),
+                        sl_trigger=self._px(sl_px), cl_ord_id=cl_id)
             except OkxAuthError as e:
                 log.warning("OKX emir hatası %s: %s", setup.symbol, e)
                 return None
@@ -317,6 +337,17 @@ class OkxDemoEngine:
     def _inst_id(self, symbol: str) -> str:
         from terminal.data.okx_futures import _to_inst
         return _to_inst(symbol)
+
+    @staticmethod
+    def _px(px: float) -> str:
+        """OKX fiyat string'i: ASLA bilimsel notasyon (51000 tpTriggerPx error).
+        FLOKI gibi düşük fiyatlarda str(2.9e-05)='2.9e-05' → OKX reddeder. Decimal
+        ile sabit-ondalık string üret (sondaki gereksiz sıfırlar kırpılır)."""
+        d = Decimal(repr(float(px))).normalize()
+        s = format(d, "f")            # 'f' = bilimsel notasyon YOK
+        if "." in s:
+            s = s.rstrip("0").rstrip(".")
+        return s
 
     @staticmethod
     def _calc_pnl(direction, entry_px, exit_px, notional) -> float:
