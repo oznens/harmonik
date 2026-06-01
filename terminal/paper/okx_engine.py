@@ -515,15 +515,20 @@ class OkxDemoEngine:
                     log.info("OKX CLOSE: %s setup#%d realizedPnl=%.4f", symbol, sid, pnl)
                     updated += 1
 
-            # ÖKSÜZ OCO temizliği: pozisyon kapanınca (TP/SL biri tetiklenince OCO
-            # zaten gider, ama elle 'Close all' ya da eski birikme sonrası) açık
-            # pozisyonu OLMAYAN iliştirilmiş TP/SL emirleri parkta kalabiliyor →
-            # margin/parite kilitler. Pozisyonsuz OCO'ları iptal et.
-            updated += self._cleanup_orphan_algos(open_pos)
+            # ÖKSÜZ OCO temizliği: GERÇEKTEN sahipsiz (ne açık pozisyon ne açık DB
+            # kaydı olan) iliştirilmiş TP/SL'leri iptal et. KRİTİK: DB'de açık (live/
+            # filled) kaydı olan paritenin OCO'suna DOKUNMA — limit modunda emir
+            # dolmadan beklerken pozisyon henüz yok, OCO 'öksüz' görünür; iptal
+            # edersek limit dolunca KORUMASIZ pozisyon kalır (bug). open_db_syms koru.
+            open_db_syms = {
+                self._inst_id(row[0]) for row in self.store._conn.execute(
+                    "SELECT symbol FROM okx_trades WHERE closed_at IS NULL").fetchall()}
+            updated += self._cleanup_orphan_algos(open_pos | open_db_syms)
             return updated
 
-    def _cleanup_orphan_algos(self, open_pos: set) -> int:
-        """Açık pozisyonu olmayan bekleyen OCO (TP/SL) emirlerini iptal et."""
+    def _cleanup_orphan_algos(self, protected: set) -> int:
+        """Korunan (açık pozisyon VEYA açık DB kaydı olan) parite DIŞINDAKI bekleyen
+        OCO'ları iptal et. protected: bu instId'lere ait OCO'lara dokunma."""
         cleaned = 0
         try:
             algos = self.client.algo_pending(ord_type="oco")
@@ -532,12 +537,12 @@ class OkxDemoEngine:
         for a in algos:
             inst = a.get("instId")
             algo_id = a.get("algoId")
-            if not inst or not algo_id or inst in open_pos:
-                continue   # pozisyonu var → koruması geçerli, dokunma
+            if not inst or not algo_id or inst in protected:
+                continue   # pozisyonu/açık DB kaydı var → koruması geçerli, dokunma
             try:
                 self.client.cancel_algo(inst, algo_id, ord_type="oco")
-                log.info("OKX OCO temizlik: %s öksüz TP/SL iptal (algoId=%s, pozisyon yok)",
-                         inst, algo_id)
+                log.info("OKX OCO temizlik: %s öksüz TP/SL iptal (algoId=%s, "
+                         "pozisyon+DB kaydı yok)", inst, algo_id)
                 cleaned += 1
             except OkxAuthError as e:
                 log.warning("OKX OCO iptal hatası %s: %s", inst, e)

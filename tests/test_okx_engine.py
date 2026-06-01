@@ -216,6 +216,21 @@ def test_sync_cleans_orphan_oco(store):
     assert ("AAVE-USDT-SWAP", "a1") not in canceled   # pozisyonlu → korundu
 
 
+def test_cleanup_keeps_oco_of_pending_limit(store):
+    """KRİTİK: limit emri DOLMADAN beklerken (DB'de live, OKX'te poz YOK) OCO'su
+    'öksüz' görünür ama İPTAL EDİLMEMELİ — yoksa limit dolunca korumasız kalır."""
+    s, sid = _setup(store)                       # TESTUSDT → TEST-USDT-SWAP
+    fake = _FakeOkx()
+    eng = OkxDemoEngine(store, fake, _fake_instruments(), entry_type="limit")
+    eng.open_trade(s, sid, s.detected_at)        # DB'ye live limit kaydı + OCO
+    inst = eng._inst_id(s.symbol)
+    fake.positions = lambda: []                  # limit henüz DOLMADI (poz yok)
+    fake.algos = [{"instId": inst, "algoId": "pending1"}]   # iliştirilmiş OCO
+    eng.sync()
+    canceled = getattr(fake, "canceled_algos", [])
+    assert (inst, "pending1") not in canceled    # DB'de açık kayıt → OCO KORUNDU
+
+
 def test_one_position_per_symbol(store):
     s, sid = _setup(store)
     fake = _FakeOkx()
