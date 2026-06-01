@@ -210,6 +210,28 @@ class OkxDemoClient:
         data = p.get("data", [{}])
         return data[0] if data else {}
 
+    def orders_pending(self, inst_type: str = "SWAP") -> list[dict[str, Any]]:
+        """Bekleyen (henüz dolmamış) normal emirler — resting limit dahil."""
+        p = self._request("GET", f"/api/v5/trade/orders-pending?instType={inst_type}")
+        return p.get("data", [])
+
+    def close_position(self, symbol: str, mgn_mode: str = "cross",
+                       pos_side: str | None = None,
+                       auto_cxl: bool = True) -> dict[str, Any]:
+        """Açık pozisyonu market ile TAM kapat (/trade/close-position).
+
+        auto_cxl=True → pozisyona iliştirilmiş bekleyen TP/SL emirleri de iptal.
+        pos_side: hedge modunda 'long'/'short'; net modda None (gönderilmez).
+        """
+        body: dict[str, Any] = {
+            "instId": _to_inst(symbol), "mgnMode": mgn_mode, "autoCxl": auto_cxl,
+        }
+        if pos_side in ("long", "short"):
+            body["posSide"] = pos_side
+        p = self._request("POST", "/api/v5/trade/close-position", body)
+        data = p.get("data", [{}])
+        return data[0] if data else {}
+
     def order_state(self, symbol: str, ord_id: str) -> dict[str, Any]:
         """Tek emrin durumu (live/filled/canceled...)."""
         p = self._request("GET",
