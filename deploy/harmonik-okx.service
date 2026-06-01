@@ -22,6 +22,9 @@ Environment=OKX_PASSPHRASE=DOLDUR
 # Giriş: KOD DEFAULT artık limit (sadece fiyat D seviyesine gelirse gir, ideal
 # harmonik fiyat). Market kovalama -661$/WR43 ettirdi. Flag gerekmez; market
 # istenirse --entry-type market eklenir.
+# --pamonic: SADECE D bölgesinde Order Block olan setuplara gir (enforce — OB
+# yoksa pas geç). Stop OB arkası (dar) + yapısal TP (tp2=A) → yüksek R:R. İşlem
+# sayısı düşer ama kalite artar (paper ölçümünde kârın %98'i OB'li işlemlerdeydi).
 ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_demo \
     --combos-file config/tracked_combos.txt \
     --poll-seconds 60 \
@@ -30,6 +33,7 @@ ExecStart=/home/harmonik/harmonik-okx/venv/bin/python -m terminal.cli.run_okx_de
     --risk 20 \
     --target-margin 30 \
     --max-notional 6000 \
+    --pamonic \
     --log-level INFO
 Restart=on-failure
 RestartSec=10
