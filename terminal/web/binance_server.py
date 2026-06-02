@@ -435,11 +435,9 @@ def _trade_page(db_path, setup_id) -> bytes:
     harmonic = []
     try:
         if r["x_time"] is not None:
-            for key, lbl in (("x", "X"), ("a", "A"), ("b", "B"), ("c", "C"), ("d", "D")):
-                t = int(r[f"{key}_time"]) // 1000
-                harmonic.append({"time": t, "value": r[f"{key}_price"]})
-                markers.append({"time": (t // sec) * sec, "position": "inBar",
-                                "color": "#f0b90b", "shape": "circle", "text": lbl})
+            for key in ("x", "a", "b", "c", "d"):
+                harmonic.append({"time": int(r[f"{key}_time"]) // 1000,
+                                 "value": r[f"{key}_price"]})
     except (KeyError, TypeError, ValueError):
         harmonic = []
     markers.sort(key=lambda m: m["time"])
