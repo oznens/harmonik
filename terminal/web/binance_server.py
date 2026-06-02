@@ -376,32 +376,57 @@ _TRADE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <style>body{margin:0;background:#0e0e10;color:#e6e6ea;font-family:-apple-system,'Segoe UI',sans-serif}
 .bar{padding:9px 12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:13px;border-bottom:1px solid #222}
 .bar b{font-size:15px}.g{color:#4caf50}.r{color:#ef5350}.d{color:#888}a{color:#f0b90b;text-decoration:none}
-#c{width:100vw;height:78vh}.note{color:#888;font-size:11px;padding:6px 12px}</style></head>
+#wrap{position:relative;width:100vw;height:78vh}#c{width:100%;height:100%}
+#ov{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.note{color:#888;font-size:11px;padding:6px 12px}</style></head>
 <body><div class="bar"><a href="/">← geri</a> <b>__SYM__</b> <span class="d">__IV__</span>
 <span class="__DC__">__DIR__</span> <span class="d">__PAT__</span>
 <span>Entry <b>__ENTRY__</b></span> <span class="r">SL __STOP__</span> <span class="g">TP __TP__</span>
 <span>Sonuç <b class="__PC__">__PNL__</b></span>
 <a href="__TVURL__" target="_blank">TradingView ↗</a></div>
-<div id="c"></div><div class="note">Sarı=XABCD · Mor=OB (Order Block) · Mavi=Entry · Kırmızı=SL · Yeşil=TP · oklar giriş/çıkış. Mumlar Binance.</div>
+<div id="wrap"><div id="c"></div><div id="ov"></div></div>
+<div class="note">Mor kutu=OB (Order Block) · CE=OB ortası · Kırmızı=SL bölgesi · Yeşil=TP bölgesi · Sarı=XABCD · oklar giriş/çıkış. Mumlar Binance.</div>
 <script src="/lwc.js"></script><script>
-var L=window.LightweightCharts;
-var ch=L.createChart(document.getElementById('c'),{layout:{background:{color:'#0e0e10'},textColor:'#aaa'},
- grid:{vertLines:{color:'#181818'},horzLines:{color:'#181818'}},timeScale:{timeVisible:true,borderColor:'#333'},
- rightPriceScale:{borderColor:'#333'}});
+var L=window.LightweightCharts, wrap=document.getElementById('wrap'), ov=document.getElementById('ov');
+var ch=L.createChart(document.getElementById('c'),{width:wrap.clientWidth,height:wrap.clientHeight,
+ layout:{background:{color:'#0e0e10'},textColor:'#aaa'},grid:{vertLines:{color:'#181818'},horzLines:{color:'#181818'}},
+ timeScale:{timeVisible:true,borderColor:'#333'},rightPriceScale:{borderColor:'#333'}});
 var s=ch.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,
  wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
 function pl(p,c,t){s.createPriceLine({price:p,color:c,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:t});}
+var EN=__ENTRYV__,SL=__STOPV__,TP=__TPV__,BULL=__BULL__,OBLO=__OBLOW__,OBHI=__OBHIGH__,OBT=__OBT__,T0=__T0__,T1=__T1__;
+function box(t0,t1,pHi,pLo,bg,bd){
+ var x0=ch.timeScale().timeToCoordinate(t0),x1=ch.timeScale().timeToCoordinate(t1),
+     yH=s.priceToCoordinate(pHi),yL=s.priceToCoordinate(pLo),W=ov.clientWidth;
+ if(yH==null||yL==null)return; if(x0==null)x0=0; if(x1==null)x1=W; if(x1<x0){var z=x0;x0=x1;x1=z;}
+ var d=document.createElement('div');
+ d.style.cssText='position:absolute;left:'+x0+'px;top:'+yH+'px;width:'+(x1-x0)+'px;height:'+
+  (yL-yH)+'px;background:'+bg+';border:1px solid '+bd+';box-sizing:border-box;border-radius:2px';
+ ov.appendChild(d);
+}
+function draw(){
+ ov.innerHTML='';
+ if(BULL) box(T0,T1,TP,EN,'rgba(38,166,154,0.10)','rgba(38,166,154,0.45)');
+ else     box(T0,T1,EN,TP,'rgba(38,166,154,0.10)','rgba(38,166,154,0.45)');
+ if(OBLO!=null){
+  if(BULL) box(OBT,T1,OBLO,SL,'rgba(239,83,80,0.15)','rgba(239,83,80,0.45)');
+  else     box(OBT,T1,SL,OBHI,'rgba(239,83,80,0.15)','rgba(239,83,80,0.45)');
+  box(OBT,T1,OBHI,OBLO,'rgba(124,77,255,0.18)','rgba(124,77,255,0.7)');
+ }
+}
 fetch('/klines?symbol=__SYM__&interval=__IV__&end=__END__').then(x=>x.json()).then(function(d){
  s.setData(d.candles||[]);
  var hd=__HARMONIC__;
  if(hd.length){var hl=ch.addLineSeries({color:'#f0b90b',lineWidth:2,lineStyle:0,
    lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});hl.setData(hd);}
- pl(__ENTRYV__,'#42a5f5','Entry'); pl(__STOPV__,'#ef5350','SL'); pl(__TPV__,'#26a69a','TP');
- __OB__
+ pl(EN,'#42a5f5','Entry'); pl(SL,'#ef5350','SL'); pl(TP,'#26a69a','TP');
+ if(OBLO!=null) pl((OBHI+OBLO)/2,'#7c4dff','CE');
  var m=__MARKERS__; if(m.length) s.setMarkers(m);
- ch.timeScale().fitContent();
+ ch.timeScale().fitContent(); draw(); setTimeout(draw,60);
 });
-window.addEventListener('resize',function(){ch.applyOptions({});});
+ch.timeScale().subscribeVisibleTimeRangeChange(draw);
+window.addEventListener('resize',function(){
+ ch.applyOptions({width:wrap.clientWidth,height:wrap.clientHeight}); draw();});
 </script></body></html>"""
 
 
@@ -447,7 +472,7 @@ def _trade_page(db_path, setup_id) -> bytes:
         harmonic = []
     markers.sort(key=lambda m: m["time"])
     # Order Block — PaMonic'in D bölgesinde bulduğu OB'yi mumlardan yeniden hesapla
-    ob_low = ob_high = None
+    ob_low = ob_high = ob_time = None
     try:
         if r["d_time"] is not None and r["prz_low"] is not None:
             kl = _fetch_klines(r["symbol"], r["interval"], end)
@@ -463,11 +488,13 @@ def _trade_page(db_path, setup_id) -> bytes:
                 st.prz_high = r["prz_high"]
                 ob = pamonic_confluence(st, kl, min_displacement=0.003, near_bars=15, d_index=di)
                 if ob is not None:
-                    ob_low, ob_high = ob.bottom, ob.top
+                    ob_low, ob_high, ob_time = ob.bottom, ob.top, ob.time
     except Exception:
-        ob_low = ob_high = None
-    ob_js = (f"pl({ob_high!r},'#ab47bc','OB üst'); pl({ob_low!r},'#ab47bc','OB alt');"
-             if ob_low is not None else "")
+        ob_low = ob_high = ob_time = None
+    is_bull = r["direction"] == "bull"
+    t0 = (r["opened_at"] or r["d_time"] or 0) // 1000
+    t1 = end // 1000
+    obt = (ob_time or r["d_time"] or 0) // 1000
     tv = (f"https://www.tradingview.com/chart/?symbol=BINANCE:{_e(r['symbol'])}.P"
           f"&interval={_TV_TF.get(r['interval'], '15')}")
     html = _TRADE_HTML
@@ -478,7 +505,11 @@ def _trade_page(db_path, setup_id) -> bytes:
         "__PNL__": pstr, "__PC__": pc, "__TVURL__": tv, "__END__": str(end),
         "__ENTRYV__": repr(r["entry_px"]), "__STOPV__": repr(r["stop_px"]),
         "__TPV__": repr(r["tp_px"]), "__MARKERS__": json.dumps(markers),
-        "__HARMONIC__": json.dumps(harmonic), "__OB__": ob_js,
+        "__HARMONIC__": json.dumps(harmonic),
+        "__BULL__": "true" if is_bull else "false",
+        "__OBLOW__": repr(ob_low) if ob_low is not None else "null",
+        "__OBHIGH__": repr(ob_high) if ob_high is not None else "null",
+        "__OBT__": str(obt), "__T0__": str(t0), "__T1__": str(t1),
     }.items():
         html = html.replace(k, v)
     return html.encode("utf-8")
