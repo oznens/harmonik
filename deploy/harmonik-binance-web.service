@@ -1,0 +1,24 @@
+[Unit]
+Description=harmonik Binance testnet web dashboard (mobil, salt-okunur)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=harmonik
+WorkingDirectory=/home/harmonik/harmonik-binance
+Environment=PYTHONUNBUFFERED=1
+Environment=WEB_USER=admin
+Environment=WEB_PASS=DEGISTIR_BENI
+Environment=BINANCE_WEB_PORT=8091
+# Canlı testnet bakiye için (opsiyonel — yoksa '—' gösterir):
+Environment=BINANCE_API_KEY=DOLDUR
+Environment=BINANCE_SECRET=DOLDUR
+ExecStart=/home/harmonik/harmonik-binance/venv/bin/python -m terminal.web.binance_server --log-level INFO
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/harmonik/binance-web.log
+StandardError=append:/var/log/harmonik/binance-web.err
+
+[Install]
+WantedBy=multi-user.target

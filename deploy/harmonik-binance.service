@@ -1,0 +1,43 @@
+[Unit]
+Description=harmonik Binance testnet trade hattı (gerçek testnet emirleri)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=harmonik
+WorkingDirectory=/home/harmonik/harmonik-binance
+Environment=PYTHONUNBUFFERED=1
+# Binance TESTNET trading API kimliği (testnet.binancefuture.com → API Key).
+# BUNLARI DOLDUR:
+Environment=BINANCE_API_KEY=DOLDUR
+Environment=BINANCE_SECRET=DOLDUR
+# VERİ KAYNAĞI: default mainnet fapi (temiz piyasa yapısı). VPS'ten 451
+# (coğrafi engel) gelirse ExecStart'a --testnet-data ekle → testnet kendi
+# verisini kullanır (fiyatlar mainnet'i yakından takip eder).
+#
+# CONFIG (OKX analizinden çıkan DÜZELTME):
+#   --risk 5          : düşük risk → PaMonic'in dar OB-stoplarını sığdırır.
+#   --max-notional YOK: tavan PaMonic'in yüksek-R kazananlarını eliyordu (OKX'te
+#                       cap 6000 +213K→-4K yapıyordu). Sınırsız bırak.
+#   --target-margin 30: her işlem ~$30 teminat → çok pozisyon sığar, risk sabit.
+#   --pamonic         : D bölgesinde OB olan setuplara gir (dar stop + yapısal TP).
+#   Giriş: KOD DEFAULT limit (ideal harmonik fiyat).
+ExecStart=/home/harmonik/harmonik-binance/venv/bin/python -m terminal.cli.run_binance_test \
+    --combos-file config/tracked_combos.txt \
+    --poll-seconds 60 \
+    --stagger-ms 300 \
+    --sync-seconds 30 \
+    --risk 5 \
+    --target-margin 30 \
+    --pamonic \
+    --log-level INFO
+Restart=on-failure
+RestartSec=10
+TasksMax=2000
+LimitNOFILE=65536
+StandardOutput=append:/var/log/harmonik/binance.log
+StandardError=append:/var/log/harmonik/binance.err
+
+[Install]
+WantedBy=multi-user.target
