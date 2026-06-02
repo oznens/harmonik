@@ -12,12 +12,14 @@ from __future__ import annotations
 import argparse
 import base64
 import html as html_mod
+import json
 import logging
 import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from terminal.config import DB_PATH
 
@@ -103,8 +105,8 @@ def _best_cards(rows):
         dt, dc = _dir(r["direction"])
         pnl = r["pnl_usd"] or 0
         out.append(
-            f'<a class="tcard" href="{_tv(r["symbol"], r["interval"])}" target="_blank" '
-            f'title="Grafiği aç (TradingView)">'
+            f'<a class="tcard" href="{_trade_link(r["setup_id"])}" '
+            f'title="İşlem grafiğini aç (entry/SL/TP)">'
             f'<div class="h"><span class="sym {dc}">{_e(r["symbol"])}</span>'
             f'<span class="tf">{_e(r["interval"])}</span></div>'
             f'<div class="pat">{_e(r["pattern"])} · <span class="{dc}">{dt}</span></div>'
@@ -164,13 +166,13 @@ def render(db_path, refresh: int) -> str:
         conn.row_factory = sqlite3.Row
         try:
             rows_open = conn.execute(
-                "SELECT o.symbol,o.interval,o.pattern,o.direction,o.entry_px,o.stop_px,"
+                "SELECT o.setup_id,o.symbol,o.interval,o.pattern,o.direction,o.entry_px,o.stop_px,"
                 "o.tp_px,o.leverage,o.notional_usd,o.opened_at,o.state,"
                 "s.q_score,s.confluence_score "
                 "FROM binance_trades o LEFT JOIN setups s ON s.id=o.setup_id "
                 "WHERE o.closed_at IS NULL ORDER BY o.opened_at DESC").fetchall()
             rows_closed = conn.execute(
-                "SELECT o.symbol,o.interval,o.pattern,o.direction,o.entry_px,o.exit_px,"
+                "SELECT o.setup_id,o.symbol,o.interval,o.pattern,o.direction,o.entry_px,o.exit_px,"
                 "o.leverage,o.pnl_usd,o.state,o.closed_at,s.q_score,s.confluence_score "
                 "FROM binance_trades o LEFT JOIN setups s ON s.id=o.setup_id "
                 "WHERE o.closed_at IS NOT NULL ORDER BY o.closed_at DESC LIMIT 100").fetchall()
@@ -182,7 +184,7 @@ def render(db_path, refresh: int) -> str:
                 "FROM binance_trades WHERE closed_at IS NOT NULL "
                 "GROUP BY pattern ORDER BY (tp+sl) DESC").fetchall()
             best5 = conn.execute(
-                "SELECT symbol,interval,pattern,direction,entry_px,tp_px,stop_px,"
+                "SELECT setup_id,symbol,interval,pattern,direction,entry_px,tp_px,stop_px,"
                 "pnl_usd,closed_at FROM binance_trades "
                 "WHERE state='closed' AND pnl_usd IS NOT NULL AND pnl_usd>0 "
                 "ORDER BY pnl_usd DESC LIMIT 5").fetchall()
@@ -292,8 +294,8 @@ def _open_table(rows, live_pos=None):
         up_html = ('<td class="d">—</td>' if up is None else
                    f'<td class="{"g" if up>=0 else "r"}" data-s="{up}">'
                    f'{"+" if up>=0 else ""}${up:.2f}</td>')
-        b.append(f'<tr><td class="l"><a class="tlink" href="{_tv(r["symbol"], r["interval"])}" '
-                 f'target="_blank" title="Grafiği aç">{_e(r["symbol"])}</a></td><td>{_e(r["interval"])}</td>'
+        b.append(f'<tr><td class="l"><a class="tlink" href="{_trade_link(r["setup_id"])}" '
+                 f'title="İşlem grafiği">{_e(r["symbol"])}</a></td><td>{_e(r["interval"])}</td>'
                  f'<td class="l">{_e(r["pattern"])}</td><td class="{dc}">{dt}</td>'
                  f'<td>{_fmt_px(r["entry_px"])}</td><td>{_fmt_px(mark)}</td>'
                  f'<td>{_fmt_px(r["stop_px"])}</td><td>{_fmt_px(r["tp_px"])}</td>'
@@ -317,8 +319,8 @@ def _closed_table(rows):
         pnl = r["pnl_usd"] or 0
         res = "TP" if pnl > 0 else "STOP" if pnl < 0 else r["state"]
         rc = "g" if pnl > 0 else "r" if pnl < 0 else "d"
-        b.append(f'<tr><td class="l"><a class="tlink" href="{_tv(r["symbol"], r["interval"])}" '
-                 f'target="_blank" title="Grafiği aç">{_e(r["symbol"])}</a></td><td>{_e(r["interval"])}</td>'
+        b.append(f'<tr><td class="l"><a class="tlink" href="{_trade_link(r["setup_id"])}" '
+                 f'title="İşlem grafiği">{_e(r["symbol"])}</a></td><td>{_e(r["interval"])}</td>'
                  f'<td class="l">{_e(r["pattern"])}</td><td class="{dc}">{dt}</td>'
                  f'<td>{_fmt_px(r["entry_px"])}</td><td>{_fmt_px(r["exit_px"])}</td>'
                  f'<td>{r["leverage"]:.0f}x</td>'
@@ -327,6 +329,115 @@ def _closed_table(rows):
                  f'<td class="{rc}">{res}</td>'
                  f'<td class="d" data-s="{r["closed_at"] or 0}">{_fmt_ts(r["closed_at"])}</td></tr>')
     return h + "".join(b) + "</tbody></table>"
+
+
+_LWC_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ui", "assets",
+                         "lightweight-charts.standalone.production.js")
+_ISEC = {"15m": 900, "30m": 1800, "60m": 3600, "1h": 3600, "2h": 7200,
+         "4h": 14400, "8h": 28800, "1d": 86400}
+
+
+def _trade_link(setup_id) -> str:
+    return f"/trade?id={setup_id}"
+
+
+def _klines_json(symbol, interval, end_ms=None) -> bytes:
+    """Grafik için mum verisi — BINANCE'ten (işlemin gerçekleştiği borsa; 42
+    sembolün hepsi var, OKX'te olmayanlar dahil). Sunucu proxy'ler → CORS yok."""
+    from terminal.data.binance_futures import BINANCE_DATA_BASE, BinanceFuturesClient
+    from terminal.data.binance_trade import BINANCE_TESTNET
+    # testnet (işlemin gerçekleştiği venue, fiyat fill ile tutarlı) → mainnet fallback
+    bases = ([BINANCE_DATA_BASE, BINANCE_TESTNET] if os.environ.get("WEB_KLINES_MAINNET")
+             else [BINANCE_TESTNET, BINANCE_DATA_BASE])
+    kl = []
+    for base in bases:
+        c = BinanceFuturesClient(base_url=base)
+        try:
+            kl = (c.klines_paginated(symbol, interval, 300, end_time_ms=end_ms)
+                  if end_ms else c.klines(symbol, interval, 300))
+        except Exception:
+            kl = []
+        finally:
+            c.close()
+        if kl:
+            break
+    candles = [{"time": int(k["open_time"] // 1000), "open": k["open"], "high": k["high"],
+                "low": k["low"], "close": k["close"]} for k in kl]
+    return json.dumps({"candles": candles}).encode("utf-8")
+
+
+_TRADE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__SYM__ __IV__ · işlem grafiği</title>
+<style>body{margin:0;background:#0e0e10;color:#e6e6ea;font-family:-apple-system,'Segoe UI',sans-serif}
+.bar{padding:9px 12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:13px;border-bottom:1px solid #222}
+.bar b{font-size:15px}.g{color:#4caf50}.r{color:#ef5350}.d{color:#888}a{color:#f0b90b;text-decoration:none}
+#c{width:100vw;height:78vh}.note{color:#888;font-size:11px;padding:6px 12px}</style></head>
+<body><div class="bar"><a href="/">← geri</a> <b>__SYM__</b> <span class="d">__IV__</span>
+<span class="__DC__">__DIR__</span> <span class="d">__PAT__</span>
+<span>Entry <b>__ENTRY__</b></span> <span class="r">SL __STOP__</span> <span class="g">TP __TP__</span>
+<span>Sonuç <b class="__PC__">__PNL__</b></span>
+<a href="__TVURL__" target="_blank">TradingView ↗</a></div>
+<div id="c"></div><div class="note">Mavi=Entry · Kırmızı=SL · Yeşil=TP · oklar giriş/çıkış. Mumlar Binance.</div>
+<script src="/lwc.js"></script><script>
+var L=window.LightweightCharts;
+var ch=L.createChart(document.getElementById('c'),{layout:{background:{color:'#0e0e10'},textColor:'#aaa'},
+ grid:{vertLines:{color:'#181818'},horzLines:{color:'#181818'}},timeScale:{timeVisible:true,borderColor:'#333'},
+ rightPriceScale:{borderColor:'#333'}});
+var s=ch.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,
+ wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
+function pl(p,c,t){s.createPriceLine({price:p,color:c,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:t});}
+fetch('/klines?symbol=__SYM__&interval=__IV__&end=__END__').then(x=>x.json()).then(function(d){
+ s.setData(d.candles||[]);
+ pl(__ENTRYV__,'#42a5f5','Entry'); pl(__STOPV__,'#ef5350','SL'); pl(__TPV__,'#26a69a','TP');
+ var m=__MARKERS__; if(m.length) s.setMarkers(m);
+ ch.timeScale().fitContent();
+});
+window.addEventListener('resize',function(){ch.applyOptions({});});
+</script></body></html>"""
+
+
+def _trade_page(db_path, setup_id) -> bytes:
+    try:
+        conn = _connect(db_path)
+        conn.row_factory = sqlite3.Row
+        r = conn.execute(
+            "SELECT b.symbol,b.interval,b.direction,b.pattern,b.entry_px,b.stop_px,b.tp_px,"
+            "b.opened_at,b.closed_at,b.pnl_usd FROM binance_trades b WHERE b.setup_id=?",
+            (setup_id,)).fetchone()
+        conn.close()
+    except sqlite3.Error:
+        r = None
+    if r is None:
+        return (b"<html><body style='background:#0e0e10;color:#ccc;font-family:sans-serif'>"
+                b"<p style='padding:20px'>\xc4\xb0\xc5\x9flem bulunamad\xc4\xb1. <a style='color:#f0b90b' href='/'>geri</a></p></body></html>")
+    sec = _ISEC.get(r["interval"], 900)
+    end = (r["closed_at"] or r["opened_at"] or 0) + 60 * sec * 1000
+    dirn, dc = _dir(r["direction"])
+    pnl = r["pnl_usd"]
+    pc = "g" if (pnl or 0) >= 0 else "r"
+    pstr = "—" if pnl is None else f"{'+' if pnl >= 0 else ''}${pnl:.2f}"
+    mk = []
+    if r["opened_at"]:
+        t = (r["opened_at"] // 1000 // sec) * sec
+        mk.append("{time:%d,position:'belowBar',color:'#42a5f5',shape:'arrowUp',text:'giriş'}" % t)
+    if r["closed_at"]:
+        t = (r["closed_at"] // 1000 // sec) * sec
+        col = "#26a69a" if (pnl or 0) >= 0 else "#ef5350"
+        mk.append("{time:%d,position:'aboveBar',color:'%s',shape:'arrowDown',text:'çıkış'}" % (t, col))
+    tv = (f"https://www.tradingview.com/chart/?symbol=BINANCE:{_e(r['symbol'])}.P"
+          f"&interval={_TV_TF.get(r['interval'], '15')}")
+    html = _TRADE_HTML
+    for k, v in {
+        "__SYM__": _e(r["symbol"]), "__IV__": _e(r["interval"]), "__DIR__": dirn, "__DC__": dc,
+        "__PAT__": _e(r["pattern"]), "__ENTRY__": _fmt_px(r["entry_px"]),
+        "__STOP__": _fmt_px(r["stop_px"]), "__TP__": _fmt_px(r["tp_px"]),
+        "__PNL__": pstr, "__PC__": pc, "__TVURL__": tv, "__END__": str(end),
+        "__ENTRYV__": repr(r["entry_px"]), "__STOPV__": repr(r["stop_px"]),
+        "__TPV__": repr(r["tp_px"]), "__MARKERS__": "[" + ",".join(mk) + "]",
+    }.items():
+        html = html.replace(k, v)
+    return html.encode("utf-8")
 
 
 def make_handler(db_path, user, password, refresh):
@@ -344,14 +455,34 @@ def make_handler(db_path, user, password, refresh):
                 self.send_header("WWW-Authenticate", 'Basic realm="binance"')
                 self.end_headers()
                 return
-            if self.path == "/favicon.ico":
+            parsed = urlparse(self.path)
+            path = parsed.path
+            if path == "/favicon.ico":
                 self.send_response(204)
                 self.end_headers()
                 return
             try:
-                body = render(db_path, refresh).encode("utf-8")
+                if path == "/lwc.js":
+                    with open(_LWC_PATH, "rb") as f:
+                        body = f.read()
+                    ctype = "application/javascript"
+                elif path == "/klines":
+                    q = parse_qs(parsed.query)
+                    sym = q.get("symbol", [""])[0].upper()
+                    iv = q.get("interval", ["15m"])[0]
+                    end = q.get("end", [None])[0]
+                    body = _klines_json(sym, iv, int(end) if end and end.isdigit() else None)
+                    ctype = "application/json"
+                elif path == "/trade":
+                    sid = parse_qs(parsed.query).get("id", [""])[0]
+                    body = _trade_page(db_path, int(sid)) if sid.isdigit() \
+                        else b"<a href='/'>geri</a>"
+                    ctype = "text/html; charset=utf-8"
+                else:
+                    body = render(db_path, refresh).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Type", ctype)
                 self.end_headers()
                 self.wfile.write(body)
             except Exception:
