@@ -66,11 +66,53 @@ table.sortable th{cursor:pointer;user-select:none}
 table.sortable th:hover{color:#cdd0d6}
 table.sortable th.asc::after{content:" \\2191";color:#f0b90b;font-size:10px}
 table.sortable th.desc::after{content:" \\2193";color:#f0b90b;font-size:10px}
+a.tlink{color:inherit;text-decoration:none}
+a.tlink:hover{color:#f0b90b;text-decoration:underline}
+.tcards{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.tcard{flex:1 1 150px;min-width:148px;background:#15171c;border:1px solid #2a2a32;border-left:3px solid #4caf50;border-radius:8px;padding:9px 11px;text-decoration:none;color:#e6e6ea;display:block}
+.tcard:hover{border-color:#f0b90b;background:#1c1f26}
+.tcard .h{display:flex;justify-content:space-between;align-items:center}
+.tcard .sym{font-size:14px;font-weight:700}
+.tcard .tf{font-size:10px;color:#aaa;background:#252833;padding:1px 6px;border-radius:4px}
+.tcard .pat{font-size:11px;color:#9aa;margin:3px 0}
+.tcard .pnl{font-size:18px;font-weight:800;margin:2px 0}
+.tcard .px{font-size:10px;color:#888}.tcard .dt{font-size:10px;color:#666;margin-top:3px}
 """
 
 
 def _dir(d):
     return ("BULL ▲", "g") if d == "bull" else ("BEAR ▼", "r")
+
+
+_TV_TF = {"15m": "15", "30m": "30", "60m": "60", "1h": "60", "2h": "120",
+          "4h": "240", "8h": "480", "1d": "1D"}
+
+
+def _tv(symbol, interval):
+    """TradingView grafik linki (Binance perp) — karta/satıra tıklayınca açılır."""
+    return (f"https://www.tradingview.com/chart/?symbol=BINANCE:"
+            f"{_e(symbol)}.P&interval={_TV_TF.get(interval, '15')}")
+
+
+def _best_cards(rows):
+    """O güne kadarki en iyi N kapanan işlem — MEXC kartı stili (tıklanabilir)."""
+    if not rows:
+        return '<div class="empty">Henüz kapanan işlem yok.</div>'
+    out = ['<div class="tcards">']
+    for r in rows:
+        dt, dc = _dir(r["direction"])
+        pnl = r["pnl_usd"] or 0
+        out.append(
+            f'<a class="tcard" href="{_tv(r["symbol"], r["interval"])}" target="_blank" '
+            f'title="Grafiği aç (TradingView)">'
+            f'<div class="h"><span class="sym {dc}">{_e(r["symbol"])}</span>'
+            f'<span class="tf">{_e(r["interval"])}</span></div>'
+            f'<div class="pat">{_e(r["pattern"])} · <span class="{dc}">{dt}</span></div>'
+            f'<div class="pnl g">+${pnl:.2f}</div>'
+            f'<div class="px">Entry {_fmt_px(r["entry_px"])} → TP {_fmt_px(r["tp_px"])}</div>'
+            f'<div class="dt">{_fmt_ts(r["closed_at"])}</div></a>')
+    out.append("</div>")
+    return "".join(out)
 
 
 def _connect(db):
@@ -114,7 +156,7 @@ def _m(v) -> str:
 
 
 def render(db_path, refresh: int) -> str:
-    rows_open, rows_closed, pat_rows = [], [], []
+    rows_open, rows_closed, pat_rows, best5 = [], [], [], []
     tp = sl = 0
     total_pnl = 0.0
     try:
@@ -139,6 +181,11 @@ def render(db_path, refresh: int) -> str:
                 "SUM(COALESCE(pnl_usd,0)) pnl "
                 "FROM binance_trades WHERE closed_at IS NOT NULL "
                 "GROUP BY pattern ORDER BY (tp+sl) DESC").fetchall()
+            best5 = conn.execute(
+                "SELECT symbol,interval,pattern,direction,entry_px,tp_px,stop_px,"
+                "pnl_usd,closed_at FROM binance_trades "
+                "WHERE state='closed' AND pnl_usd IS NOT NULL AND pnl_usd>0 "
+                "ORDER BY pnl_usd DESC LIMIT 5").fetchall()
             acc = conn.execute(
                 "SELECT SUM(CASE WHEN pnl_usd>0 THEN 1 ELSE 0 END),"
                 "SUM(CASE WHEN pnl_usd<0 THEN 1 ELSE 0 END),"
@@ -179,6 +226,8 @@ def render(db_path, refresh: int) -> str:
 <body><div class="wrap">
 <h1>🟡 Binance Testnet — Harmonik (gerçek testnet borsa)</h1>
 {cards}
+<div class="sec">🏆 En İyi 5 İşlem (o güne kadarki)</div>
+{_best_cards(best5)}
 <div class="sec">📊 Harmonik Performansı ({len(pat_rows)})</div>
 <div class="tablewrap">{_pattern_table(pat_rows)}</div>
 <div class="sec">🟢 Açık Pozisyonlar ({len(rows_open)})</div>
@@ -243,7 +292,8 @@ def _open_table(rows, live_pos=None):
         up_html = ('<td class="d">—</td>' if up is None else
                    f'<td class="{"g" if up>=0 else "r"}" data-s="{up}">'
                    f'{"+" if up>=0 else ""}${up:.2f}</td>')
-        b.append(f'<tr><td class="l">{_e(r["symbol"])}</td><td>{_e(r["interval"])}</td>'
+        b.append(f'<tr><td class="l"><a class="tlink" href="{_tv(r["symbol"], r["interval"])}" '
+                 f'target="_blank" title="Grafiği aç">{_e(r["symbol"])}</a></td><td>{_e(r["interval"])}</td>'
                  f'<td class="l">{_e(r["pattern"])}</td><td class="{dc}">{dt}</td>'
                  f'<td>{_fmt_px(r["entry_px"])}</td><td>{_fmt_px(mark)}</td>'
                  f'<td>{_fmt_px(r["stop_px"])}</td><td>{_fmt_px(r["tp_px"])}</td>'
@@ -267,7 +317,8 @@ def _closed_table(rows):
         pnl = r["pnl_usd"] or 0
         res = "TP" if pnl > 0 else "STOP" if pnl < 0 else r["state"]
         rc = "g" if pnl > 0 else "r" if pnl < 0 else "d"
-        b.append(f'<tr><td class="l">{_e(r["symbol"])}</td><td>{_e(r["interval"])}</td>'
+        b.append(f'<tr><td class="l"><a class="tlink" href="{_tv(r["symbol"], r["interval"])}" '
+                 f'target="_blank" title="Grafiği aç">{_e(r["symbol"])}</a></td><td>{_e(r["interval"])}</td>'
                  f'<td class="l">{_e(r["pattern"])}</td><td class="{dc}">{dt}</td>'
                  f'<td>{_fmt_px(r["entry_px"])}</td><td>{_fmt_px(r["exit_px"])}</td>'
                  f'<td>{r["leverage"]:.0f}x</td>'
