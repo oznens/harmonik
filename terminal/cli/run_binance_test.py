@@ -195,6 +195,13 @@ def main(argv: list[str] | None = None) -> int:
     store = Store()
     # INSTRUMENT: emirler testnet'e gidiyor → tick/step/minNotional testnet'ten
     instruments = BinanceInstruments(base_url=BINANCE_TESTNET, max_lever=args.max_lever)
+    # GERÇEK kaldıraç bracket'leri (per-sembol max kaldıraç + notional cap) → -4028/
+    # -2027 önler, düşük-max-kaldıraçlı junk semboller min_lever kapısıyla elenir.
+    try:
+        n = instruments.apply_brackets(trade_client.leverage_brackets())
+        log.info("Kaldıraç bracket'leri uygulandı (%d sembol)", n)
+    except Exception as e:
+        log.warning("Kaldıraç bracket'leri çekilemedi (default max_lever kullanılacak): %s", e)
 
     before = len(combos)
     combos = [(s, iv) for s, iv in combos if instruments.get(s) is not None]

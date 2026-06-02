@@ -133,6 +133,14 @@ class BinanceTestClient:
         totalMarginBalance, totalUnrealizedProfit, availableBalance."""
         return self._request("GET", "/fapi/v2/account")
 
+    def leverage_brackets(self) -> list[dict[str, Any]]:
+        """Tüm semboller için kaldıraç bracket'leri (/fapi/v1/leverageBracket).
+
+        Dönüş: [{symbol, brackets:[{bracket, initialLeverage, notionalCap,...}]}].
+        brackets[0] = en yüksek kaldıraç + o kademenin max notional'ı (cap).
+        """
+        return self._request("GET", "/fapi/v1/leverageBracket")
+
     def positions(self) -> list[dict[str, Any]]:
         """Açık pozisyonlar (/fapi/v2/positionRisk) — positionAmt != 0 olanlar."""
         data = self._request("GET", "/fapi/v2/positionRisk")

@@ -41,6 +41,8 @@ class Instrument:
     min_qty: float       # min miktar (coin)
     min_notional: float  # min pozisyon büyüklüğü ($)
     max_lever: float     # izin verilen max kaldıraç
+    lev_notional_cap: float = 0.0  # en yüksek kaldıraç kademesinin max notional'ı
+                                    # (0=bilinmiyor; aşılırsa -2027). leverageBracket'ten.
 
     def round_qty(self, qty: float) -> float:
         """Miktarı step adımına yuvarla (aşağı) — Decimal ile temiz kuyruk."""
@@ -121,6 +123,36 @@ class BinanceInstruments:
                     log.warning("Binance instruments çekilemedi: %s", e)
             return self._cache.get(symbol)
 
+    def apply_brackets(self, brackets: list[dict[str, Any]]) -> int:
+        """leverageBracket sonucunu uygula: her sembolün GERÇEK max kaldıracı +
+        notional cap'i. -4028 (geçersiz kaldıraç) ve -2027 (max pozisyon) önler;
+        düşük-max-kaldıraçlı junk semboller min_lever kapısıyla elenir. Returns:
+        güncellenen sembol sayısı."""
+        with self._lock:
+            if not self._cache:
+                try:
+                    self._load_all()
+                except httpx.HTTPError:
+                    return 0
+            n = 0
+            for b in brackets or []:
+                inst = self._cache.get(b.get("symbol"))
+                brs = b.get("brackets") or []
+                if inst is None or not brs:
+                    continue
+                top = brs[0]
+                try:
+                    lev = float(top.get("initialLeverage") or 0)
+                    cap = float(top.get("notionalCap") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if lev > 0:
+                    inst.max_lever = lev
+                if cap > 0:
+                    inst.lev_notional_cap = cap
+                n += 1
+            return n
+
     def size_for(self, symbol: str, entry: float, stop: float, price: float,
                  risk_usd: float, equity: float,
                  max_user_lever: int = 100, aggressive_leverage: bool = True,
@@ -146,6 +178,11 @@ class BinanceInstruments:
             return Sizing(0, 1, round(notional, 2), 0, False,
                           f"notional ${notional:.0f} > tavan ${max_notional:.0f} "
                           f"(SL %{sl_pct*100:.2f} çok dar)")
+        # Borsa bracket cap'i (leverageBracket): aşılırsa Binance -2027 reddeder → atla.
+        if inst.lev_notional_cap > 0 and notional > inst.lev_notional_cap:
+            return Sizing(0, 1, round(notional, 2), 0, False,
+                          f"notional ${notional:.0f} > borsa bracket cap "
+                          f"${inst.lev_notional_cap:.0f} ({symbol} düşük-likidite)")
         if target_margin > 0:
             lever = int(min(max(1, round(notional / target_margin)), inst.max_lever))
             cap = target_margin * lever
