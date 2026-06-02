@@ -1,15 +1,15 @@
 """Binance testnet trade motoru — OkxDemoEngine'in Binance karşılığı (ayrı, paralel).
 
 Kendi DB tablosu (binance_trades). Setup AKTIF olunca testnet'e tek LIMIT/MARKET
-entry atar. ENGINE-YÖNETİMLİ exit: borsa-native STOP_MARKET/TAKE_PROFIT_MARKET bu
-testnet'te /fapi/v1/order'da desteklenmiyor (-4120) → sync() her turda markPrice'a
-bakıp stop/tp seviyesine değen pozisyonu MARKET reduceOnly ile kapatır. Pozisyonu
-positionRisk'ten, P&L'i income(REALIZED_PNL)'den takip eder.
+entry atar. Dolum sonrası BORSADA-DURAN TP/SL koyar (conditional algo emri,
+/fapi/v1/algoOrder — 2025-12'de conditional emirler buraya taşındı). markPrice
+backstop yedek kalır (algo gecikmesi/başarısızlığı için). Pozisyonu positionRisk'ten,
+P&L'i income(REALIZED_PNL)'den takip eder.
 
 Akış:
   open_trade(setup) → size → set_leverage → entry → binance_trades'e kaydet (stop/tp saklı)
-  sync()            → dolum/iptal; açık pozisyonda markPrice ile SL/TP → market kapat;
-                      kapanınca gerçek realizedPnl yaz
+  sync()            → dolum/iptal; dolunca SL+TP algo koy (OCO, biri tetiklenince
+                      diğeri otomatik iptal); markPrice backstop; kapanınca realizedPnl yaz
 """
 from __future__ import annotations
 
@@ -300,11 +300,12 @@ class BinanceTestEngine:
             except BinanceAuthError:
                 positions = {}
             rows = self.store._conn.execute(
-                "SELECT setup_id, symbol, ord_id, state, direction, stop_px, tp_px, opened_at "
-                "FROM binance_trades WHERE closed_at IS NULL").fetchall()
+                "SELECT setup_id, symbol, ord_id, sl_ord_id, state, direction, "
+                "stop_px, tp_px, opened_at FROM binance_trades WHERE closed_at IS NULL").fetchall()
             updated = 0
             now = int(time.time() * 1000)
-            for sid, symbol, ord_id, state, direction, stop_px, tp_px, opened_at in rows:
+            for (sid, symbol, ord_id, sl_ord_id, state, direction,
+                 stop_px, tp_px, opened_at) in rows:
                 in_pos = symbol in positions
                 try:
                     st = self.client.order_state(symbol, ord_id).get("status", "")
@@ -331,7 +332,7 @@ class BinanceTestEngine:
                     state = "filled"
                 if state != "filled":
                     continue
-                # Pozisyon AÇIK → engine-yönetimli SL/TP kontrolü (markPrice)
+                # Pozisyon AÇIK
                 if in_pos:
                     p = positions[symbol]
                     try:
@@ -342,14 +343,37 @@ class BinanceTestEngine:
                     if mark <= 0 or amt == 0:
                         continue
                     is_bull = direction == "bull"
+                    exit_side = "SELL" if is_bull else "BUY"
+                    # 1) Borsada-duran TP/SL henüz konmadıysa koy (gerçek koruma; pozisyon
+                    #    kapanınca diğeri Binance'çe otomatik iptal = OCO).
+                    if not sl_ord_id:
+                        sl_id = tp_id = None
+                        try:
+                            r = self.client.place_algo_order(symbol, exit_side, "STOP_MARKET",
+                                    self._num(stop_px), close_position=True)
+                            sl_id = str(r.get("algoId") or "")
+                        except BinanceAuthError as ex:
+                            log.warning("BNB SL algo hatası %s: %s", symbol, ex)
+                        try:
+                            r = self.client.place_algo_order(symbol, exit_side,
+                                    "TAKE_PROFIT_MARKET", self._num(tp_px), close_position=True)
+                            tp_id = str(r.get("algoId") or "")
+                        except BinanceAuthError as ex:
+                            log.warning("BNB TP algo hatası %s: %s", symbol, ex)
+                        if sl_id or tp_id:
+                            self.store._conn.execute(
+                                "UPDATE binance_trades SET sl_ord_id=?, tp_ord_id=? WHERE setup_id=?",
+                                (sl_id, tp_id, sid))
+                            log.info("BNB TP/SL kondu (algo): %s SL=%s TP=%s", symbol, sl_id, tp_id)
+                            sl_ord_id = sl_id or tp_id
+                    # 2) markPrice BACKSTOP — algo gecikmesi/başarısızlığı için yedek
                     hit_sl = (mark <= stop_px) if is_bull else (mark >= stop_px)
                     hit_tp = (mark >= tp_px) if is_bull else (mark <= tp_px)
                     if hit_sl or hit_tp:
-                        exit_side = "SELL" if amt > 0 else "BUY"
                         try:
-                            self.client.place_order(symbol, exit_side, qty=self._num(abs(amt)),
-                                                    ord_type="MARKET", reduce_only=True)
-                            log.info("BNB EXIT(%s): %s setup#%d mark=%.6g → market kapat",
+                            self.client.place_order(symbol, "SELL" if amt > 0 else "BUY",
+                                    qty=self._num(abs(amt)), ord_type="MARKET", reduce_only=True)
+                            log.info("BNB EXIT(%s backstop): %s setup#%d mark=%.6g",
                                      "SL" if hit_sl else "TP", symbol, sid, mark)
                             updated += 1
                         except BinanceAuthError as ex:

@@ -8,10 +8,11 @@ Kimlik ENV'den (sohbete/repoya YAZILMAZ):  BINANCE_API_KEY, BINANCE_SECRET
   query_string = tüm parametreler + timestamp + recvWindow (urlencode sırasıyla).
   Header: X-MBX-APIKEY. POST'ta da parametreler query string'de gider.
 
-TP/SL: bu testnet STOP_MARKET/TAKE_PROFIT_MARKET'i /fapi/v1/order'da REDDEDİYOR
-(-4120). Bu yüzden çıkış ENGINE-YÖNETİMLİ: motor markPrice'a bakıp seviyeye değince
-MARKET reduceOnly ile kapatır (bkz. binance_engine.sync). place_order yine
-STOP_MARKET/closePosition destekler (mainnet / ileride lazım olursa).
+TP/SL: 2025-12-09'da conditional emirler (STOP_MARKET/TAKE_PROFIT_MARKET/STOP/
+TAKE_PROFIT/TRAILING_STOP_MARKET) /fapi/v1/order'dan ALGO endpoint'ine taşındı —
+eski endpoint -4120 verir. Borsada-duran TP/SL artık place_algo_order ile
+(/fapi/v1/algoOrder, algoType=CONDITIONAL, triggerPrice). Engine fill sonrası
+SL+TP algo'su koyar; markPrice backstop yedek kalır.
 
 Sembol: BTCUSDT (dönüşüm yok). Net (one-way) mod varsayılır (positionSide=BOTH).
 """
@@ -97,10 +98,10 @@ class BinanceTestClient:
             payload = r.json()
         except ValueError:
             raise BinanceAuthError(f"binance {method} {path}: HTTP {r.status_code} {r.text[:120]}")
-        if r.status_code != 200 or (isinstance(payload, dict) and payload.get("code", 0)
-                                    not in (0, 200) and "code" in payload and "msg" in payload):
-            raise BinanceAuthError(f"binance API reddi: {payload.get('code')} "
-                                   f"{payload.get('msg')} ({method} {path})")
+        if r.status_code >= 400:
+            code = payload.get("code") if isinstance(payload, dict) else ""
+            msg = payload.get("msg") if isinstance(payload, dict) else str(payload)[:120]
+            raise BinanceAuthError(f"binance API reddi: {code} {msg} ({method} {path})")
         return payload
 
     # ---- hesap ----
@@ -236,11 +237,52 @@ class BinanceTestClient:
                             {"symbol": symbol, "orderId": order_id})
 
     def cancel_all(self, symbol: str) -> dict[str, Any]:
-        """Paritedeki tüm açık emirleri iptal (öksüz TP/SL temizliği)."""
+        """Paritedeki tüm açık (normal) emirleri iptal."""
         try:
             return self._request("DELETE", "/fapi/v1/allOpenOrders", {"symbol": symbol})
         except BinanceAuthError as e:
             log.warning("cancel_all(%s): %s", symbol, e)
+            return {}
+
+    # ---- conditional algo emirleri (TP/SL) — 2025-12 sonrası /fapi/v1/algoOrder ----
+
+    def place_algo_order(self, symbol: str, side: str, ord_type: str,
+                         trigger_price: str, close_position: bool = True,
+                         qty: str | None = None, working_type: str = "MARK_PRICE",
+                         client_id: str | None = None) -> dict[str, Any]:
+        """Conditional algo emri (borsada-duran TP/SL). 2025-12-09'da conditional
+        emirler /fapi/v1/order'dan buraya taşındı (-4120). algoType=CONDITIONAL.
+
+        ord_type: STOP_MARKET (SL) | TAKE_PROFIT_MARKET (TP) | STOP | TAKE_PROFIT.
+        trigger_price: tetik fiyatı (eski 'stopPrice' → artık 'triggerPrice').
+        close_position=True → tetiklenince pozisyonu TAM kapatır (qty gerekmez).
+        Pozisyon kapanınca kalan closePosition algo'su Binance'çe otomatik iptal (OCO).
+        """
+        body: dict[str, Any] = {
+            "symbol": symbol, "algoType": "CONDITIONAL", "side": side,
+            "type": ord_type, "triggerPrice": trigger_price, "workingType": working_type,
+        }
+        if close_position:
+            body["closePosition"] = "true"
+        elif qty is not None:
+            body["quantity"] = qty
+            body["reduceOnly"] = "true"
+        if client_id:
+            body["clientAlgoId"] = client_id
+        return self._request("POST", "/fapi/v1/algoOrder", body)
+
+    def open_algo_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
+        """Açık conditional algo emirleri (/fapi/v1/openAlgoOrders)."""
+        return self._request("GET", "/fapi/v1/openAlgoOrders",
+                            {"symbol": symbol} if symbol else None)
+
+    def cancel_algo_order(self, symbol: str, algo_id: str | int) -> dict[str, Any]:
+        """Tek conditional algo emrini iptal et (DELETE /fapi/v1/algoOrder)."""
+        try:
+            return self._request("DELETE", "/fapi/v1/algoOrder",
+                                {"symbol": symbol, "algoId": algo_id})
+        except BinanceAuthError as e:
+            log.warning("cancel_algo_order(%s, %s): %s", symbol, algo_id, e)
             return {}
 
     def realized_pnl(self, symbol: str, since_ms: int | None = None) -> float:
