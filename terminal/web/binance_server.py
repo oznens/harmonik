@@ -378,7 +378,7 @@ _TRADE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <span>Entry <b>__ENTRY__</b></span> <span class="r">SL __STOP__</span> <span class="g">TP __TP__</span>
 <span>Sonuç <b class="__PC__">__PNL__</b></span>
 <a href="__TVURL__" target="_blank">TradingView ↗</a></div>
-<div id="c"></div><div class="note">Mavi=Entry · Kırmızı=SL · Yeşil=TP · oklar giriş/çıkış. Mumlar Binance.</div>
+<div id="c"></div><div class="note">Sarı=XABCD formasyon · Mavi=Entry · Kırmızı=SL · Yeşil=TP · oklar giriş/çıkış. Mumlar Binance.</div>
 <script src="/lwc.js"></script><script>
 var L=window.LightweightCharts;
 var ch=L.createChart(document.getElementById('c'),{layout:{background:{color:'#0e0e10'},textColor:'#aaa'},
@@ -389,6 +389,9 @@ var s=ch.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisib
 function pl(p,c,t){s.createPriceLine({price:p,color:c,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:t});}
 fetch('/klines?symbol=__SYM__&interval=__IV__&end=__END__').then(x=>x.json()).then(function(d){
  s.setData(d.candles||[]);
+ var hd=__HARMONIC__;
+ if(hd.length){var hl=ch.addLineSeries({color:'#f0b90b',lineWidth:2,lineStyle:0,
+   lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});hl.setData(hd);}
  pl(__ENTRYV__,'#42a5f5','Entry'); pl(__STOPV__,'#ef5350','SL'); pl(__TPV__,'#26a69a','TP');
  var m=__MARKERS__; if(m.length) s.setMarkers(m);
  ch.timeScale().fitContent();
@@ -403,8 +406,11 @@ def _trade_page(db_path, setup_id) -> bytes:
         conn.row_factory = sqlite3.Row
         r = conn.execute(
             "SELECT b.symbol,b.interval,b.direction,b.pattern,b.entry_px,b.stop_px,b.tp_px,"
-            "b.opened_at,b.closed_at,b.pnl_usd FROM binance_trades b WHERE b.setup_id=?",
-            (setup_id,)).fetchone()
+            "b.opened_at,b.closed_at,b.pnl_usd,"
+            "s.x_time,s.x_price,s.a_time,s.a_price,s.b_time,s.b_price,"
+            "s.c_time,s.c_price,s.d_time,s.d_price "
+            "FROM binance_trades b LEFT JOIN setups s ON s.id=b.setup_id "
+            "WHERE b.setup_id=?", (setup_id,)).fetchone()
         conn.close()
     except sqlite3.Error:
         r = None
@@ -417,14 +423,26 @@ def _trade_page(db_path, setup_id) -> bytes:
     pnl = r["pnl_usd"]
     pc = "g" if (pnl or 0) >= 0 else "r"
     pstr = "—" if pnl is None else f"{'+' if pnl >= 0 else ''}${pnl:.2f}"
-    mk = []
+    markers = []
     if r["opened_at"]:
-        t = (r["opened_at"] // 1000 // sec) * sec
-        mk.append("{time:%d,position:'belowBar',color:'#42a5f5',shape:'arrowUp',text:'giriş'}" % t)
+        markers.append({"time": (r["opened_at"] // 1000 // sec) * sec, "position": "belowBar",
+                        "color": "#42a5f5", "shape": "arrowUp", "text": "giriş"})
     if r["closed_at"]:
-        t = (r["closed_at"] // 1000 // sec) * sec
         col = "#26a69a" if (pnl or 0) >= 0 else "#ef5350"
-        mk.append("{time:%d,position:'aboveBar',color:'%s',shape:'arrowDown',text:'çıkış'}" % (t, col))
+        markers.append({"time": (r["closed_at"] // 1000 // sec) * sec, "position": "aboveBar",
+                        "color": col, "shape": "arrowDown", "text": "çıkış"})
+    # XABCD harmonik formasyon (setups tablosundan pivotlar)
+    harmonic = []
+    try:
+        if r["x_time"] is not None:
+            for key, lbl in (("x", "X"), ("a", "A"), ("b", "B"), ("c", "C"), ("d", "D")):
+                t = int(r[f"{key}_time"]) // 1000
+                harmonic.append({"time": t, "value": r[f"{key}_price"]})
+                markers.append({"time": (t // sec) * sec, "position": "inBar",
+                                "color": "#f0b90b", "shape": "circle", "text": lbl})
+    except (KeyError, TypeError, ValueError):
+        harmonic = []
+    markers.sort(key=lambda m: m["time"])
     tv = (f"https://www.tradingview.com/chart/?symbol=BINANCE:{_e(r['symbol'])}.P"
           f"&interval={_TV_TF.get(r['interval'], '15')}")
     html = _TRADE_HTML
@@ -434,7 +452,8 @@ def _trade_page(db_path, setup_id) -> bytes:
         "__STOP__": _fmt_px(r["stop_px"]), "__TP__": _fmt_px(r["tp_px"]),
         "__PNL__": pstr, "__PC__": pc, "__TVURL__": tv, "__END__": str(end),
         "__ENTRYV__": repr(r["entry_px"]), "__STOPV__": repr(r["stop_px"]),
-        "__TPV__": repr(r["tp_px"]), "__MARKERS__": "[" + ",".join(mk) + "]",
+        "__TPV__": repr(r["tp_px"]), "__MARKERS__": json.dumps(markers),
+        "__HARMONIC__": json.dumps(harmonic),
     }.items():
         html = html.replace(k, v)
     return html.encode("utf-8")
