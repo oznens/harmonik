@@ -184,7 +184,8 @@ class BinanceInstruments:
                           f"notional ${notional:.0f} > borsa bracket cap "
                           f"${inst.lev_notional_cap:.0f} ({symbol} düşük-likidite)")
         if target_margin > 0:
-            lever = int(min(max(1, round(notional / target_margin)), inst.max_lever))
+            lever = int(min(max(1, round(notional / target_margin)),
+                            inst.max_lever, max_user_lever))
             cap = target_margin * lever
             if notional > cap:
                 notional = cap   # risk düşer, margin = cap (kullanıcı kararı)

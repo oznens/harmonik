@@ -300,11 +300,11 @@ class BinanceTestEngine:
             except BinanceAuthError:
                 positions = {}
             rows = self.store._conn.execute(
-                "SELECT setup_id, symbol, ord_id, sl_ord_id, state, direction, "
+                "SELECT setup_id, symbol, ord_id, sl_ord_id, tp_ord_id, state, direction, "
                 "stop_px, tp_px, opened_at FROM binance_trades WHERE closed_at IS NULL").fetchall()
             updated = 0
             now = int(time.time() * 1000)
-            for (sid, symbol, ord_id, sl_ord_id, state, direction,
+            for (sid, symbol, ord_id, sl_ord_id, tp_ord_id, state, direction,
                  stop_px, tp_px, opened_at) in rows:
                 in_pos = symbol in positions
                 try:
@@ -344,29 +344,32 @@ class BinanceTestEngine:
                         continue
                     is_bull = direction == "bull"
                     exit_side = "SELL" if is_bull else "BUY"
-                    # 1) Borsada-duran TP/SL henüz konmadıysa koy (gerçek koruma; pozisyon
-                    #    kapanınca diğeri Binance'çe otomatik iptal = OCO).
+                    # 1) Borsada-duran TP/SL — SL ve TP'yi BAĞIMSIZ koy (biri olmazsa
+                    #    diğerini tekrar koyma). Başarısızsa 'bs' sentinel sakla →
+                    #    bir daha deneme, markPrice backstop devralır. (PaMonic'in dar
+                    #    SL'i sık -2021 'would immediately trigger' verir → backstop.)
                     if not sl_ord_id:
-                        sl_id = tp_id = None
                         try:
                             r = self.client.place_algo_order(symbol, exit_side, "STOP_MARKET",
                                     self._num(stop_px), close_position=True)
-                            sl_id = str(r.get("algoId") or "")
+                            sl_ord_id = str(r.get("algoId") or "") or "bs"
                         except BinanceAuthError as ex:
-                            log.warning("BNB SL algo hatası %s: %s", symbol, ex)
+                            log.warning("BNB SL algo %s: %s → backstop", symbol, ex)
+                            sl_ord_id = "bs"
+                        self.store._conn.execute(
+                            "UPDATE binance_trades SET sl_ord_id=? WHERE setup_id=?", (sl_ord_id, sid))
+                    if not tp_ord_id:
                         try:
                             r = self.client.place_algo_order(symbol, exit_side,
                                     "TAKE_PROFIT_MARKET", self._num(tp_px), close_position=True)
-                            tp_id = str(r.get("algoId") or "")
+                            tp_ord_id = str(r.get("algoId") or "") or "bs"
                         except BinanceAuthError as ex:
-                            log.warning("BNB TP algo hatası %s: %s", symbol, ex)
-                        if sl_id or tp_id:
-                            self.store._conn.execute(
-                                "UPDATE binance_trades SET sl_ord_id=?, tp_ord_id=? WHERE setup_id=?",
-                                (sl_id, tp_id, sid))
-                            log.info("BNB TP/SL kondu (algo): %s SL=%s TP=%s", symbol, sl_id, tp_id)
-                            sl_ord_id = sl_id or tp_id
-                    # 2) markPrice BACKSTOP — algo gecikmesi/başarısızlığı için yedek
+                            log.warning("BNB TP algo %s: %s → backstop", symbol, ex)
+                            tp_ord_id = "bs"
+                        self.store._conn.execute(
+                            "UPDATE binance_trades SET tp_ord_id=? WHERE setup_id=?", (tp_ord_id, sid))
+                        log.info("BNB TP/SL: %s SL=%s TP=%s", symbol, sl_ord_id, tp_ord_id)
+                    # 2) markPrice BACKSTOP — algo konamayan (bs) / gecikmeli için yedek
                     hit_sl = (mark <= stop_px) if is_bull else (mark >= stop_px)
                     hit_tp = (mark >= tp_px) if is_bull else (mark <= tp_px)
                     if hit_sl or hit_tp:
@@ -387,6 +390,34 @@ class BinanceTestEngine:
                     "WHERE setup_id=? AND closed_at IS NULL", (round(pnl, 4), now, sid))
                 log.info("BNB CLOSE: %s setup#%d realizedPnl=%.4f", symbol, sid, pnl)
                 updated += 1
+
+            # ÖKSÜZ pozisyon temizliği: borsada açık ama binance_trades'te AÇIK kaydı
+            # olmayan pozisyonlar (eski koşu / wipe artığı). open_trade kaydı kilit
+            # içinde atomik eklediğinden yarış yok → kayıtsız pozisyon = gerçek orphan.
+            db_syms = {r[0] for r in self.store._conn.execute(
+                "SELECT symbol FROM binance_trades WHERE closed_at IS NULL").fetchall()}
+            for sym, p in positions.items():
+                if sym in db_syms:
+                    continue
+                try:
+                    amt = float(p.get("positionAmt") or 0)
+                except (ValueError, TypeError):
+                    amt = 0.0
+                if amt == 0:
+                    continue
+                try:
+                    for a in self.client.open_algo_orders(sym):
+                        self.client.cancel_algo_order(sym, a.get("algoId"))
+                except BinanceAuthError:
+                    pass
+                self.client.cancel_all(sym)
+                try:
+                    self.client.place_order(sym, "SELL" if amt > 0 else "BUY",
+                            qty=self._num(abs(amt)), ord_type="MARKET", reduce_only=True)
+                    log.info("BNB ORPHAN kapatıldı: %s (DB kaydı yok, eski artık)", sym)
+                    updated += 1
+                except BinanceAuthError as ex:
+                    log.warning("BNB orphan kapat %s: %s", sym, ex)
             return updated
 
     def summary(self) -> str:
