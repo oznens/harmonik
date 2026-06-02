@@ -341,15 +341,13 @@ def _trade_link(setup_id) -> str:
     return f"/trade?id={setup_id}"
 
 
-def _klines_json(symbol, interval, end_ms=None) -> bytes:
-    """Grafik için mum verisi — BINANCE'ten (işlemin gerçekleştiği borsa; 42
-    sembolün hepsi var, OKX'te olmayanlar dahil). Sunucu proxy'ler → CORS yok."""
+def _fetch_klines(symbol, interval, end_ms=None):
+    """Mum verisi BINANCE'ten (işlemin gerçekleştiği borsa; 42 sembolün hepsi var).
+    testnet (fill ile tutarlı) → mainnet fallback. Ham dict listesi döner."""
     from terminal.data.binance_futures import BINANCE_DATA_BASE, BinanceFuturesClient
     from terminal.data.binance_trade import BINANCE_TESTNET
-    # testnet (işlemin gerçekleştiği venue, fiyat fill ile tutarlı) → mainnet fallback
     bases = ([BINANCE_DATA_BASE, BINANCE_TESTNET] if os.environ.get("WEB_KLINES_MAINNET")
              else [BINANCE_TESTNET, BINANCE_DATA_BASE])
-    kl = []
     for base in bases:
         c = BinanceFuturesClient(base_url=base)
         try:
@@ -360,7 +358,13 @@ def _klines_json(symbol, interval, end_ms=None) -> bytes:
         finally:
             c.close()
         if kl:
-            break
+            return kl
+    return []
+
+
+def _klines_json(symbol, interval, end_ms=None) -> bytes:
+    """Grafik mum verisi (sunucu proxy → CORS yok)."""
+    kl = _fetch_klines(symbol, interval, end_ms)
     candles = [{"time": int(k["open_time"] // 1000), "open": k["open"], "high": k["high"],
                 "low": k["low"], "close": k["close"]} for k in kl]
     return json.dumps({"candles": candles}).encode("utf-8")
@@ -378,7 +382,7 @@ _TRADE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <span>Entry <b>__ENTRY__</b></span> <span class="r">SL __STOP__</span> <span class="g">TP __TP__</span>
 <span>Sonuç <b class="__PC__">__PNL__</b></span>
 <a href="__TVURL__" target="_blank">TradingView ↗</a></div>
-<div id="c"></div><div class="note">Sarı=XABCD formasyon · Mavi=Entry · Kırmızı=SL · Yeşil=TP · oklar giriş/çıkış. Mumlar Binance.</div>
+<div id="c"></div><div class="note">Sarı=XABCD · Mor=OB (Order Block) · Mavi=Entry · Kırmızı=SL · Yeşil=TP · oklar giriş/çıkış. Mumlar Binance.</div>
 <script src="/lwc.js"></script><script>
 var L=window.LightweightCharts;
 var ch=L.createChart(document.getElementById('c'),{layout:{background:{color:'#0e0e10'},textColor:'#aaa'},
@@ -393,6 +397,7 @@ fetch('/klines?symbol=__SYM__&interval=__IV__&end=__END__').then(x=>x.json()).th
  if(hd.length){var hl=ch.addLineSeries({color:'#f0b90b',lineWidth:2,lineStyle:0,
    lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});hl.setData(hd);}
  pl(__ENTRYV__,'#42a5f5','Entry'); pl(__STOPV__,'#ef5350','SL'); pl(__TPV__,'#26a69a','TP');
+ __OB__
  var m=__MARKERS__; if(m.length) s.setMarkers(m);
  ch.timeScale().fitContent();
 });
@@ -408,7 +413,7 @@ def _trade_page(db_path, setup_id) -> bytes:
             "SELECT b.symbol,b.interval,b.direction,b.pattern,b.entry_px,b.stop_px,b.tp_px,"
             "b.opened_at,b.closed_at,b.pnl_usd,"
             "s.x_time,s.x_price,s.a_time,s.a_price,s.b_time,s.b_price,"
-            "s.c_time,s.c_price,s.d_time,s.d_price "
+            "s.c_time,s.c_price,s.d_time,s.d_price,s.prz_low,s.prz_high "
             "FROM binance_trades b LEFT JOIN setups s ON s.id=b.setup_id "
             "WHERE b.setup_id=?", (setup_id,)).fetchone()
         conn.close()
@@ -441,6 +446,28 @@ def _trade_page(db_path, setup_id) -> bytes:
     except (KeyError, TypeError, ValueError):
         harmonic = []
     markers.sort(key=lambda m: m["time"])
+    # Order Block — PaMonic'in D bölgesinde bulduğu OB'yi mumlardan yeniden hesapla
+    ob_low = ob_high = None
+    try:
+        if r["d_time"] is not None and r["prz_low"] is not None:
+            kl = _fetch_klines(r["symbol"], r["interval"], end)
+            di = next((i for i, k in enumerate(kl) if k["open_time"] == r["d_time"]), None)
+            if di is not None:
+                from terminal.quality.pamonic import pamonic_confluence
+
+                class _S:
+                    pass
+                st = _S()
+                st.direction = r["direction"]
+                st.prz_low = r["prz_low"]
+                st.prz_high = r["prz_high"]
+                ob = pamonic_confluence(st, kl, min_displacement=0.003, near_bars=15, d_index=di)
+                if ob is not None:
+                    ob_low, ob_high = ob.bottom, ob.top
+    except Exception:
+        ob_low = ob_high = None
+    ob_js = (f"pl({ob_high!r},'#ab47bc','OB üst'); pl({ob_low!r},'#ab47bc','OB alt');"
+             if ob_low is not None else "")
     tv = (f"https://www.tradingview.com/chart/?symbol=BINANCE:{_e(r['symbol'])}.P"
           f"&interval={_TV_TF.get(r['interval'], '15')}")
     html = _TRADE_HTML
@@ -451,7 +478,7 @@ def _trade_page(db_path, setup_id) -> bytes:
         "__PNL__": pstr, "__PC__": pc, "__TVURL__": tv, "__END__": str(end),
         "__ENTRYV__": repr(r["entry_px"]), "__STOPV__": repr(r["stop_px"]),
         "__TPV__": repr(r["tp_px"]), "__MARKERS__": json.dumps(markers),
-        "__HARMONIC__": json.dumps(harmonic),
+        "__HARMONIC__": json.dumps(harmonic), "__OB__": ob_js,
     }.items():
         html = html.replace(k, v)
     return html.encode("utf-8")
