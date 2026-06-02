@@ -377,7 +377,7 @@ _TRADE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
 .bar{padding:9px 12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:13px;border-bottom:1px solid #222}
 .bar b{font-size:15px}.g{color:#4caf50}.r{color:#ef5350}.d{color:#888}a{color:#f0b90b;text-decoration:none}
 #wrap{position:relative;width:100vw;height:78vh}#c{width:100%;height:100%}
-#ov{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#ov{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:5}
 .note{color:#888;font-size:11px;padding:6px 12px}</style></head>
 <body><div class="bar"><a href="/">← geri</a> <b>__SYM__</b> <span class="d">__IV__</span>
 <span class="__DC__">__DIR__</span> <span class="d">__PAT__</span>
@@ -422,7 +422,8 @@ fetch('/klines?symbol=__SYM__&interval=__IV__&end=__END__').then(x=>x.json()).th
  pl(EN,'#42a5f5','Entry'); pl(SL,'#ef5350','SL'); pl(TP,'#26a69a','TP');
  if(OBLO!=null) pl((OBHI+OBLO)/2,'#7c4dff','CE');
  var m=__MARKERS__; if(m.length) s.setMarkers(m);
- ch.timeScale().fitContent(); draw(); setTimeout(draw,60);
+ ch.timeScale().fitContent();
+ requestAnimationFrame(draw); setTimeout(draw,80); setTimeout(draw,300);
 });
 ch.timeScale().subscribeVisibleTimeRangeChange(draw);
 window.addEventListener('resize',function(){
