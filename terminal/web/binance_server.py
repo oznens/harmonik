@@ -77,18 +77,40 @@ def _connect(db):
     return sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
 
 
-def _live_equity() -> str:
-    """Binance testnet'ten kullanılabilir USDT (availableBalance)."""
+def _live_account() -> dict:
+    """Binance testnet'ten gerçek hesap özeti + açık pozisyon uPnL'leri.
+
+    Returns: {wallet, margin, avail, upnl, positions:{symbol:{upnl,mark}}} —
+    okunamazsa değerler None.
+    """
+    out = {"wallet": None, "margin": None, "avail": None, "upnl": None,
+           "positions": {}}
     try:
         from terminal.data.binance_trade import BinanceTestClient
         c = BinanceTestClient()
         if not c.has_credentials():
-            return "—"
-        av = c.free_usdt()
+            return out
+        a = c.account()
+        out["wallet"] = float(a.get("totalWalletBalance") or 0)
+        out["margin"] = float(a.get("totalMarginBalance") or 0)
+        out["avail"] = float(a.get("availableBalance") or 0)
+        out["upnl"] = float(a.get("totalUnrealizedProfit") or 0)
+        for p in c.positions():
+            try:
+                out["positions"][p["symbol"]] = {
+                    "upnl": float(p.get("unRealizedProfit") or 0),
+                    "mark": float(p.get("markPrice") or 0),
+                }
+            except (ValueError, TypeError, KeyError):
+                pass
         c.close()
-        return f"{float(av):,.0f}" if av is not None else "—"
     except Exception:
-        return "—"
+        pass
+    return out
+
+
+def _m(v) -> str:
+    return f"${v:,.2f}" if v is not None else "—"
 
 
 def render(db_path, refresh: int) -> str:
@@ -133,11 +155,17 @@ def render(db_path, refresh: int) -> str:
     wr = (tp / decided * 100) if decided else 0
     pnl_cls = "g" if total_pnl > 0 else "r" if total_pnl < 0 else "d"
     now = datetime.now(tz=TZ).strftime("%H:%M:%S")
-    equity = _live_equity()
+    acct = _live_account()
+    upnl = acct["upnl"]
+    upnl_cls = "g" if (upnl or 0) > 0 else "r" if (upnl or 0) < 0 else "d"
+    upnl_str = "—" if upnl is None else f"{'+' if upnl >= 0 else '-'}${abs(upnl):,.2f}"
 
     cards = f"""<div class="cards">
-      <div class="card"><div class="lbl">Kullanılabilir USDT</div><div class="val">${equity}</div></div>
-      <div class="card"><div class="lbl">Toplam P&amp;L</div><div class="val {pnl_cls}">{'+' if total_pnl>=0 else ''}${total_pnl:.2f}</div></div>
+      <div class="card"><div class="lbl">Cüzdan</div><div class="val">{_m(acct['wallet'])}</div></div>
+      <div class="card"><div class="lbl">Equity</div><div class="val">{_m(acct['margin'])}</div></div>
+      <div class="card"><div class="lbl">Kullanılabilir</div><div class="val">{_m(acct['avail'])}</div></div>
+      <div class="card"><div class="lbl">Açık P&amp;L</div><div class="val {upnl_cls}">{upnl_str}</div></div>
+      <div class="card"><div class="lbl">Kapalı P&amp;L</div><div class="val {pnl_cls}">{'+' if total_pnl>=0 else ''}${total_pnl:.2f}</div></div>
       <div class="card"><div class="lbl">Win Rate</div><div class="val {'g' if wr>=50 else 'r'}">{wr:.0f}%</div></div>
       <div class="card"><div class="lbl">TP</div><div class="val g">{tp}</div></div>
       <div class="card"><div class="lbl">STOP</div><div class="val r">{sl}</div></div>
@@ -154,7 +182,7 @@ def render(db_path, refresh: int) -> str:
 <div class="sec">📊 Harmonik Performansı ({len(pat_rows)})</div>
 <div class="tablewrap">{_pattern_table(pat_rows)}</div>
 <div class="sec">🟢 Açık Pozisyonlar ({len(rows_open)})</div>
-<div class="tablewrap">{_open_table(rows_open)}</div>
+<div class="tablewrap">{_open_table(rows_open, acct["positions"])}</div>
 <div class="sec dim">📋 Kapanan İşlemler ({len(rows_closed)})</div>
 <div class="tablewrap">{_closed_table(rows_closed)}</div>
 <div class="foot">Güncelleme: {now} · {refresh} sn · başlıklara tıkla sırala</div>
@@ -198,20 +226,28 @@ def _pattern_table(rows):
     return h + "".join(b) + "</tbody></table>"
 
 
-def _open_table(rows):
+def _open_table(rows, live_pos=None):
+    live_pos = live_pos or {}
     if not rows:
         return '<div class="empty">Açık pozisyon yok.</div>'
     h = ('<table class="sortable"><thead><tr><th class="l">Parite</th><th>TF</th>'
-         '<th class="l">Pattern</th><th>Yön</th><th>Entry</th><th>Stop</th><th>Hedef</th>'
-         '<th>Lev</th><th>Notional</th><th>Q</th><th>Conf</th><th>Açıldı</th>'
-         '</tr></thead><tbody>')
+         '<th class="l">Pattern</th><th>Yön</th><th>Entry</th><th>Mark</th><th>Stop</th>'
+         '<th>Hedef</th><th>Canlı P&amp;L</th><th>Lev</th><th>Notional</th><th>Q</th>'
+         '<th>Conf</th><th>Açıldı</th></tr></thead><tbody>')
     b = []
     for r in rows:
         dt, dc = _dir(r["direction"])
+        lp = live_pos.get(r["symbol"], {})
+        mark = lp.get("mark")
+        up = lp.get("upnl")
+        up_html = ('<td class="d">—</td>' if up is None else
+                   f'<td class="{"g" if up>=0 else "r"}" data-s="{up}">'
+                   f'{"+" if up>=0 else ""}${up:.2f}</td>')
         b.append(f'<tr><td class="l">{_e(r["symbol"])}</td><td>{_e(r["interval"])}</td>'
                  f'<td class="l">{_e(r["pattern"])}</td><td class="{dc}">{dt}</td>'
-                 f'<td>{_fmt_px(r["entry_px"])}</td><td>{_fmt_px(r["stop_px"])}</td>'
-                 f'<td>{_fmt_px(r["tp_px"])}</td><td>{r["leverage"]:.0f}x</td>'
+                 f'<td>{_fmt_px(r["entry_px"])}</td><td>{_fmt_px(mark)}</td>'
+                 f'<td>{_fmt_px(r["stop_px"])}</td><td>{_fmt_px(r["tp_px"])}</td>'
+                 f'{up_html}<td>{r["leverage"]:.0f}x</td>'
                  f'<td data-s="{r["notional_usd"]}">${r["notional_usd"]:.0f}</td>'
                  f'{_score(r["q_score"])}{_score(r["confluence_score"])}'
                  f'<td class="d" data-s="{r["opened_at"] or 0}">{_fmt_ts(r["opened_at"])}</td></tr>')

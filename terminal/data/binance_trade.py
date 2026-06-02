@@ -128,6 +128,11 @@ class BinanceTestClient:
         except (ValueError, TypeError):
             return None
 
+    def account(self) -> dict[str, Any]:
+        """Futures hesap özeti (/fapi/v2/account): totalWalletBalance,
+        totalMarginBalance, totalUnrealizedProfit, availableBalance."""
+        return self._request("GET", "/fapi/v2/account")
+
     def positions(self) -> list[dict[str, Any]]:
         """Açık pozisyonlar (/fapi/v2/positionRisk) — positionAmt != 0 olanlar."""
         data = self._request("GET", "/fapi/v2/positionRisk")
