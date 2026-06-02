@@ -8,9 +8,10 @@ Kimlik ENV'den (sohbete/repoya YAZILMAZ):  BINANCE_API_KEY, BINANCE_SECRET
   query_string = tüm parametreler + timestamp + recvWindow (urlencode sırasıyla).
   Header: X-MBX-APIKEY. POST'ta da parametreler query string'de gider.
 
-TP/SL: Binance tek emirde iliştiremez → entry + STOP_MARKET(SL) +
-TAKE_PROFIT_MARKET(TP), ikisi closePosition=true. Pozisyon kapanınca Binance
-kalan closePosition emrini OTOMATİK iptal eder (etkin OCO).
+TP/SL: bu testnet STOP_MARKET/TAKE_PROFIT_MARKET'i /fapi/v1/order'da REDDEDİYOR
+(-4120). Bu yüzden çıkış ENGINE-YÖNETİMLİ: motor markPrice'a bakıp seviyeye değince
+MARKET reduceOnly ile kapatır (bkz. binance_engine.sync). place_order yine
+STOP_MARKET/closePosition destekler (mainnet / ileride lazım olursa).
 
 Sembol: BTCUSDT (dönüşüm yok). Net (one-way) mod varsayılır (positionSide=BOTH).
 """

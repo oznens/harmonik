@@ -1,8 +1,9 @@
 """Binance Testnet canlı hat — (mainnet/testnet) veriyle tara, testnet'e emir at.
 
 run_okx_demo'nun Binance karşılığı. Her (parite × TF) worker: veriyi çek →
-scan_klines → setup AKTIF olunca BinanceTestEngine.open_trade (entry + TP/SL).
-Ayrı thread periyodik sync() çalıştırır.
+scan_klines → setup AKTIF olunca BinanceTestEngine.open_trade (tek entry emri).
+Ayrı thread periyodik sync() çalıştırır — çıkış engine-yönetimli (markPrice ile
+SL/TP → MARKET reduceOnly; testnet native TP/SL'i reddediyor, -4120).
 
 Kimlik ENV'den: BINANCE_API_KEY / BINANCE_SECRET (testnet.binancefuture.com).
 

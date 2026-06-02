@@ -1,12 +1,15 @@
 """Binance testnet trade motoru — OkxDemoEngine'in Binance karşılığı (ayrı, paralel).
 
-Kendi DB tablosu (binance_trades). Setup AKTIF olunca testnet'e LIMIT/MARKET entry
-+ ayrı STOP_MARKET(SL) + TAKE_PROFIT_MARKET(TP) (ikisi closePosition=true) atar.
-Pozisyonu positionRisk'ten, P&L'i income(REALIZED_PNL)'den takip eder.
+Kendi DB tablosu (binance_trades). Setup AKTIF olunca testnet'e tek LIMIT/MARKET
+entry atar. ENGINE-YÖNETİMLİ exit: borsa-native STOP_MARKET/TAKE_PROFIT_MARKET bu
+testnet'te /fapi/v1/order'da desteklenmiyor (-4120) → sync() her turda markPrice'a
+bakıp stop/tp seviyesine değen pozisyonu MARKET reduceOnly ile kapatır. Pozisyonu
+positionRisk'ten, P&L'i income(REALIZED_PNL)'den takip eder.
 
 Akış:
-  open_trade(setup) → size → set_leverage → entry + SL + TP → binance_trades'e kaydet
-  sync()            → emir/pozisyon durumu; dolmuş/kapanmış → güncelle, P&L, temizlik
+  open_trade(setup) → size → set_leverage → entry → binance_trades'e kaydet (stop/tp saklı)
+  sync()            → dolum/iptal; açık pozisyonda markPrice ile SL/TP → market kapat;
+                      kapanınca gerçek realizedPnl yaz
 """
 from __future__ import annotations
 
@@ -234,23 +237,11 @@ class BinanceTestEngine:
                 log.warning("BNB entry reddedildi %s: %s", setup.symbol, r)
                 return None
 
-            # TP/SL closePosition emirleri (biri tetiklenince diğerini Binance iptal eder)
+            # TP/SL: borsa-native STOP_MARKET/TAKE_PROFIT_MARKET bu testnet'te
+            # /fapi/v1/order'da DESTEKLENMİYOR (-4120). Bunun yerine ENGINE-YÖNETİMLİ
+            # exit: sync() her turda markPrice'a bakar, stop/tp seviyesine değince
+            # MARKET reduceOnly ile kapatır. stop_px/tp_px DB'de saklanır (kontrol için).
             sl_id = tp_id = None
-            try:
-                rs = self.client.place_order(setup.symbol, exit_side, ord_type="STOP_MARKET",
-                                             stop_price=self._num(sl_px), close_position=True,
-                                             client_id=f"{cl_id}s"[:36])
-                sl_id = str(rs.get("orderId") or "")
-            except BinanceAuthError as ex:
-                log.warning("BNB SL hatası %s: %s", setup.symbol, ex)
-            try:
-                rt = self.client.place_order(setup.symbol, exit_side,
-                                             ord_type="TAKE_PROFIT_MARKET",
-                                             stop_price=self._num(tp_px), close_position=True,
-                                             client_id=f"{cl_id}t"[:36])
-                tp_id = str(rt.get("orderId") or "")
-            except BinanceAuthError as ex:
-                log.warning("BNB TP hatası %s: %s", setup.symbol, ex)
 
             self.store._conn.execute(
                 """INSERT INTO binance_trades
@@ -296,33 +287,39 @@ class BinanceTestEngine:
             return True
 
     def sync(self) -> int:
-        """Açık binance trade'leri testnet'ten senkronla (dolum/kapanış/P&L/temizlik)."""
+        """Açık binance trade'leri testnet'ten senkronla.
+
+        Engine-yönetimli exit: borsa-native TP/SL yok (testnet -4120). Her turda
+        markPrice'a bakılır; stop/tp seviyesine değen pozisyon MARKET reduceOnly ile
+        kapatılır. Kapanış ile P&L kaydı AYRI turlarda — kapat → income yerleşsin →
+        bir sonraki sync 'pozisyon yok' dalında gerçek realizedPnl'i yazar.
+        """
         with self._lock:
             try:
-                open_pos = {p.get("symbol") for p in self.client.positions()}
+                positions = {p.get("symbol"): p for p in self.client.positions()}
             except BinanceAuthError:
-                open_pos = set()
+                positions = {}
             rows = self.store._conn.execute(
-                "SELECT setup_id, symbol, ord_id, state, opened_at "
+                "SELECT setup_id, symbol, ord_id, state, direction, stop_px, tp_px, opened_at "
                 "FROM binance_trades WHERE closed_at IS NULL").fetchall()
             updated = 0
             now = int(time.time() * 1000)
-            for sid, symbol, ord_id, state, opened_at in rows:
+            for sid, symbol, ord_id, state, direction, stop_px, tp_px, opened_at in rows:
+                in_pos = symbol in positions
                 try:
                     st = self.client.order_state(symbol, ord_id).get("status", "")
                 except BinanceAuthError:
                     st = ""
-                # İptal olmuş + pozisyon yok → kapat
-                if st in ("CANCELED", "EXPIRED", "REJECTED") and symbol not in open_pos:
-                    self.client.cancel_all(symbol)   # öksüz TP/SL temizliği
+                # İptal/expired + pozisyon yok → kapat
+                if st in ("CANCELED", "EXPIRED", "REJECTED") and not in_pos:
+                    self.client.cancel_all(symbol)
                     self.store._conn.execute(
                         "UPDATE binance_trades SET state='canceled', closed_at=? WHERE setup_id=?",
                         (now, sid))
                     updated += 1
                     continue
-                # Dolmamış + setup terminal → öksüz emirleri iptal (backstop)
-                if state == "live" and st not in ("FILLED", "PARTIALLY_FILLED") \
-                        and symbol not in open_pos:
+                # Dolmamış + setup terminal → entry iptal (backstop)
+                if state == "live" and st not in ("FILLED", "PARTIALLY_FILLED") and not in_pos:
                     life = self.store.get_lifecycle(sid)
                     if life is not None and life["state"] in TERMINAL_STATES:
                         if self.cancel_if_unfilled(sid):
@@ -332,15 +329,40 @@ class BinanceTestEngine:
                     self.store._conn.execute(
                         "UPDATE binance_trades SET state='filled' WHERE setup_id=?", (sid,))
                     state = "filled"
-                # Pozisyon kapandı mı: doldu (filled) ama artık açık pozisyon yok
-                if state in ("filled",) and symbol not in open_pos:
-                    pnl = self.client.realized_pnl(symbol, since_ms=opened_at - 1000)
-                    self.client.cancel_all(symbol)   # kalan closePosition emrini temizle
-                    self.store._conn.execute(
-                        "UPDATE binance_trades SET state='closed', pnl_usd=?, closed_at=? "
-                        "WHERE setup_id=? AND closed_at IS NULL", (round(pnl, 4), now, sid))
-                    log.info("BNB CLOSE: %s setup#%d realizedPnl=%.4f", symbol, sid, pnl)
-                    updated += 1
+                if state != "filled":
+                    continue
+                # Pozisyon AÇIK → engine-yönetimli SL/TP kontrolü (markPrice)
+                if in_pos:
+                    p = positions[symbol]
+                    try:
+                        mark = float(p.get("markPrice") or 0)
+                        amt = float(p.get("positionAmt") or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    if mark <= 0 or amt == 0:
+                        continue
+                    is_bull = direction == "bull"
+                    hit_sl = (mark <= stop_px) if is_bull else (mark >= stop_px)
+                    hit_tp = (mark >= tp_px) if is_bull else (mark <= tp_px)
+                    if hit_sl or hit_tp:
+                        exit_side = "SELL" if amt > 0 else "BUY"
+                        try:
+                            self.client.place_order(symbol, exit_side, qty=self._num(abs(amt)),
+                                                    ord_type="MARKET", reduce_only=True)
+                            log.info("BNB EXIT(%s): %s setup#%d mark=%.6g → market kapat",
+                                     "SL" if hit_sl else "TP", symbol, sid, mark)
+                            updated += 1
+                        except BinanceAuthError as ex:
+                            log.warning("BNB exit hatası %s: %s", symbol, ex)
+                    continue
+                # Doldu ama pozisyon YOK → kapanmış (bizim exit ya da dış) → gerçek P&L yaz
+                pnl = self.client.realized_pnl(symbol, since_ms=opened_at - 1000)
+                self.client.cancel_all(symbol)
+                self.store._conn.execute(
+                    "UPDATE binance_trades SET state='closed', pnl_usd=?, closed_at=? "
+                    "WHERE setup_id=? AND closed_at IS NULL", (round(pnl, 4), now, sid))
+                log.info("BNB CLOSE: %s setup#%d realizedPnl=%.4f", symbol, sid, pnl)
+                updated += 1
             return updated
 
     def summary(self) -> str:

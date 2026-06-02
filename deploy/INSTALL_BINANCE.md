@@ -50,6 +50,13 @@ Servis defaultları (`harmonik-binance.service`):
 - `--target-margin 30` — her işlem ~$30 teminat, çok pozisyon.
 - `--pamonic` — D'de OB olan setuplar (dar stop + yapısal TP). Giriş limit (default).
 
+## Çıkış (TP/SL) mekanizması
+Bu testnet borsa-native STOP_MARKET/TAKE_PROFIT_MARKET'i reddediyor (`-4120`).
+Çıkış **engine-yönetimli**: `sync()` (her `--sync-seconds`, default 30sn) açık
+pozisyonun `markPrice`'ını okur, stop/tp seviyesine değince **MARKET reduceOnly**
+ile kapatır. Sonuç: SL/TP `--sync-seconds` çözünürlüğünde uygulanır (15m+ için
+yeterli). Servis dururken pozisyon korumasızdır — uzun süre kapalı bırakma.
+
 ## Veri kaynağı
 - Default: **mainnet fapi** (temiz piyasa yapısı).
 - VPS'ten `451` (coğrafi engel) gelirse → `ExecStart`'a **`--testnet-data`** ekle:
