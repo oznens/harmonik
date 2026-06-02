@@ -14,7 +14,8 @@ servis, ayrı DB tablosu (`binance_trades`). Paper hattına dokunmaz.
 sudo -u harmonik git clone -b claude/brave-thompson-XRsFg <repo> /home/harmonik/harmonik-binance
 cd /home/harmonik/harmonik-binance
 sudo -u harmonik python3 -m venv venv
-sudo -u harmonik venv/bin/pip install -r requirements.txt
+# SLIM: trade hattı + web YALNIZ httpx ister (PySide6/mplfinance/pandas GEREKMEZ).
+sudo -u harmonik venv/bin/pip install -r deploy/requirements-server.txt
 ```
 
 ## 2) Servisleri kur

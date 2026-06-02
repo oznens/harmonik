@@ -1,0 +1,4 @@
+# Headless sunucu kurulumu (trade hattı + web dashboard) — MINIMAL.
+# Binance/OKX runner + web + flat YALNIZ httpx + stdlib kullanır (doğrulandı:
+# pydantic/PySide6/mplfinance/anthropic/numpy/pandas YOK). 1GB VPS'e ideal.
+httpx>=0.27
