@@ -208,13 +208,17 @@ class BinanceTestEngine:
                 log.info("BNB SKIP: %s yuvarlama sonrası SL/TP tutarsız "
                          "(entry=%.6g SL=%.6g TP=%.6g)", setup.symbol, entry_px, sl_px, tp_px)
                 return None
-            if self.entry_type == "market" and klines:
+            # CANLI-FİYAT GUARD (limit + market): emir anında fiyat SL/TP aralığının
+            # DIŞINDAYSA fiyat entry'yi çoktan geçmiş → bayat/dejenere işlem. Örn. bull
+            # limit'i fiyat stop'un altına düşmüşken koymak: anında market'ten dolar +
+            # SL zaten ihlal → aç-anında-kapa (sadece komisyon kaybı). Bunu engelle.
+            if klines:
                 last_px = float(klines[-1].get("close") or 0)
                 if last_px > 0:
                     ok_live = (sl_px < last_px < tp_px) if is_bull else (tp_px < last_px < sl_px)
                     if not ok_live:
-                        log.info("BNB SKIP (market): %s canlı %.6g TP/SL dışı → girme",
-                                 setup.symbol, last_px)
+                        log.info("BNB SKIP: %s canlı fiyat %.6g SL/TP aralığı dışı "
+                                 "(entry'yi geçmiş, bayat) → girme", setup.symbol, last_px)
                         return None
 
             cl_id = f"h{setup_id}"[:36]
