@@ -43,13 +43,16 @@ tail -f /var/log/harmonik/binance.log
 ```
 Dashboard: `http://<vps>:8091` (admin / WEB_PASS).
 
-## Config (OKX analizinden DÜZELTME)
-Servis defaultları (`harmonik-binance.service`):
-- `--risk 5` — düşük risk, PaMonic'in dar OB-stoplarını sığdırır.
-- **`--max-notional` YOK** — tavan PaMonic'in yüksek-R kazananlarını eliyordu
-  (OKX'te cap 6000: +213K backtest → −4K canlı). Sınırsız.
-- `--target-margin 30` — her işlem ~$30 teminat, çok pozisyon.
-- `--pamonic` — D'de OB olan setuplar (dar stop + yapısal TP). Giriş limit (default).
+## Config = MEXC paper VPS ile AYNI
+Servis (`harmonik-binance.service`) MEXC paper (`harmonik.service`) ile eşleşir:
+- `--risk 20` — paper ile aynı sabit risk.
+- **PaMonic YOK** → worker otomatik `rr1` target (MEXC `--target-mode rr1`).
+- `--entry-type limit` — ideal harmonik fiyat (MEXC `--paper-entry-mode limit`).
+- Filtre yok (MEXC `--paper-min-confluence 0` karşılığı, tüm setuplar).
+- max-notional / target-margin yok → risk tam $20.
+
+Kaçınılmaz fark: MEXC paper ideal fiyattan %100 dolar; Binance GERÇEK limit emir
+(fiyat D'ye dönerse dolar) + engine-yönetimli exit (testnet native TP/SL'i reddediyor).
 
 ## Çıkış (TP/SL) mekanizması
 Bu testnet borsa-native STOP_MARKET/TAKE_PROFIT_MARKET'i reddediyor (`-4120`).

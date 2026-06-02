@@ -16,21 +16,19 @@ Environment=BINANCE_SECRET=DOLDUR
 # (coğrafi engel) gelirse ExecStart'a --testnet-data ekle → testnet kendi
 # verisini kullanır (fiyatlar mainnet'i yakından takip eder).
 #
-# CONFIG (OKX analizinden çıkan DÜZELTME):
-#   --risk 5          : düşük risk → PaMonic'in dar OB-stoplarını sığdırır.
-#   --max-notional YOK: tavan PaMonic'in yüksek-R kazananlarını eliyordu (OKX'te
-#                       cap 6000 +213K→-4K yapıyordu). Sınırsız bırak.
-#   --target-margin 30: her işlem ~$30 teminat → çok pozisyon sığar, risk sabit.
-#   --pamonic         : D bölgesinde OB olan setuplara gir (dar stop + yapısal TP).
-#   Giriş: KOD DEFAULT limit (ideal harmonik fiyat).
+# CONFIG = MEXC paper VPS ile AYNI (harmonik.service):
+#   rr1 target (PaMonic YOK → worker otomatik rr1), limit giriş, risk $20,
+#   paper-min-confluence 0 karşılığı (filtre yok, tüm setuplar). PaMonic'in
+#   düşük-WR profili yerine paper'ın iyi sonuç veren config'i.
+#   Fark (kaçınılmaz): paper ideal fiyattan %100 dolar; burada GERÇEK limit emir
+#   (fiyat D'ye dönerse dolar) + engine-yönetimli exit (testnet native TP/SL yok).
 ExecStart=/home/harmonik/harmonik-binance/venv/bin/python -m terminal.cli.run_binance_test \
     --combos-file config/tracked_combos.txt \
-    --poll-seconds 60 \
+    --poll-seconds 30 \
     --stagger-ms 300 \
     --sync-seconds 30 \
-    --risk 5 \
-    --target-margin 30 \
-    --pamonic \
+    --risk 20 \
+    --entry-type limit \
     --log-level INFO
 Restart=on-failure
 RestartSec=10
