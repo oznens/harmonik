@@ -64,10 +64,11 @@ class BinanceTestEngine:
                  pamonic: bool = False, max_open: int = 0,
                  fixed_leverage: int = 0, max_notional: float = 0.0,
                  target_margin: float = 0.0, min_free_usdt: float = 0.0,
-                 entry_type: str = "limit") -> None:
+                 entry_type: str = "limit", tg=None) -> None:
         self.store = store
         self.client = client
         self.instruments = instruments
+        self.tg = tg            # opsiyonel TelegramClient — açılış/kapanış bildirimi
         self.risk = risk_per_trade
         self.initial_equity = initial_equity
         self.max_lever = max_lever
@@ -121,6 +122,15 @@ class BinanceTestEngine:
         if "." in s:
             s = s.rstrip("0").rstrip(".")
         return s
+
+    def _notify(self, text: str) -> None:
+        """Telegram bildirimi (varsa) — hata yutulur, akışı bozmaz."""
+        if self.tg is None:
+            return
+        try:
+            self.tg.send_message(text)
+        except Exception as e:
+            log.warning("BNB Telegram bildirim hatası: %s", e)
 
     def _equity(self) -> float:
         try:
@@ -259,6 +269,11 @@ class BinanceTestEngine:
             log.info("BNB OPEN(%s): %s %s %s qty=%s lev=%dx entry=%.6g TP=%.6g SL=%.6g ord=%s",
                      self.entry_type, setup.symbol, setup.interval, setup.pattern_name,
                      sizing.sz, sizing.leverage, entry_px, tp_px, sl_px, ord_id)
+            arrow = "🟢 LONG" if is_bull else "🔴 SHORT"
+            self._notify(
+                f"🟡 *BINANCE AÇILDI* {arrow}\n*{setup.symbol}* `{setup.interval}` "
+                f"{setup.pattern_name}\nEntry `{self._num(entry_px)}` · SL `{self._num(sl_px)}` "
+                f"· TP `{self._num(tp_px)}`\nlev {sizing.leverage}x · risk ${self.risk:.0f}")
             return BinanceTrade(setup_id, setup.symbol, setup.interval, setup.pattern_name,
                                 setup.direction, ord_id, entry_px, sl_px, tp_px,
                                 sizing.sz, sizing.leverage, sizing.notional_usd, opened_at)
@@ -393,6 +408,9 @@ class BinanceTestEngine:
                     "UPDATE binance_trades SET state='closed', pnl_usd=?, closed_at=? "
                     "WHERE setup_id=? AND closed_at IS NULL", (round(pnl, 4), now, sid))
                 log.info("BNB CLOSE: %s setup#%d realizedPnl=%.4f", symbol, sid, pnl)
+                res = "✅ TP" if pnl > 0 else ("❌ STOP" if pnl < 0 else "➖ ZI")
+                self._notify(f"🟡 *BINANCE KAPANDI* {res}\n*{symbol}*\n"
+                             f"P&L: `${pnl:+.2f}`")
                 updated += 1
 
             # ÖKSÜZ pozisyon temizliği: borsada açık ama binance_trades'te AÇIK kaydı

@@ -161,6 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--testnet-data", action="store_true",
                     help="Market verisini de testnet'ten çek (VPS mainnet'e erişemiyorsa).")
     ap.add_argument("--no-htf", action="store_true")
+    ap.add_argument("--no-telegram", action="store_true",
+                    help="Telegram açılış/kapanış bildirimlerini kapat.")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
 
@@ -213,12 +215,24 @@ def main(argv: list[str] | None = None) -> int:
         print("HATA: Binance testnet'te işlem gören parite kalmadı.", file=sys.stderr)
         return 1
 
+    tg = None
+    if not args.no_telegram:
+        try:
+            from terminal.telegram_bot.client import TelegramClient, TelegramError
+            try:
+                tg = TelegramClient()
+                log.info("Telegram bildirimleri AKTİF (açılış/kapanış)")
+            except TelegramError as e:
+                log.info("Telegram kapalı (token yok): %s", e)
+        except Exception as e:
+            log.warning("Telegram client yüklenemedi: %s", e)
+
     engine = BinanceTestEngine(store, trade_client, instruments,
                                risk_per_trade=args.risk, max_lever=args.max_lever,
                                pamonic=args.pamonic, max_open=args.max_open,
                                fixed_leverage=args.leverage, max_notional=args.max_notional,
                                target_margin=args.target_margin, min_free_usdt=args.min_free,
-                               entry_type=args.entry_type)
+                               entry_type=args.entry_type, tg=tg)
 
     log.info("Binance hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s, risk $%s, "
              "max-notional %s", len(combos), args.poll_seconds, args.sync_seconds,
