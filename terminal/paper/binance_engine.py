@@ -441,7 +441,19 @@ class BinanceTestEngine:
                         except BinanceAuthError as ex:
                             log.warning("BNB exit hatası %s: %s", symbol, ex)
                     continue
-                # Doldu ama pozisyon YOK → kapanmış (bizim exit ya da dış) → gerçek P&L yaz
+                # Doldu ama bulk positionRisk'te pozisyon YOK görünüyor. AMA bulk okuma
+                # ZAMAN ZAMAN bir pozisyonu geçici döndürmez → yanlış "kapandı" +
+                # SL/TP iptali + pnl=0 (erken-kapatma bug'ı). Kapatmadan ÖNCE hedefli
+                # tek-sembol sorgusuyla DOĞRULA (ikinci bağımsız okuma).
+                try:
+                    pf = self.client.position_for(symbol)
+                except BinanceAuthError:
+                    continue  # doğrulayamadık → bu tur kapatma, SL/TP korunur, sonra tekrar
+                if pf is not None:
+                    log.info("BNB close ATLANDI: %s bulk'ta yok ama hedefli sorgu AÇIK "
+                             "(positionRisk boşluğu) → SL/TP korunur, kapatılmaz", symbol)
+                    continue
+                # İki bağımsız okuma da flat → gerçekten kapanmış → gerçek P&L yaz
                 pnl = self.client.realized_pnl(symbol, since_ms=opened_at - 1000)
                 self.client.cancel_all(symbol)
                 self.store._conn.execute(
