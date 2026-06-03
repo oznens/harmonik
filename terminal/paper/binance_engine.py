@@ -452,3 +452,38 @@ class BinanceTestEngine:
                          "AND pnl_usd>0").fetchone()[0]
         wr = (wins / cl * 100) if cl else 0.0
         return f"açık {op} | kapalı {cl} (WR {wr:.0f}%) | P&L ${pnl:.2f}"
+
+    def send_daily_summary(self) -> None:
+        """Telegram'a günlük özet — açık/son24s/toplam + bakiye + günün en iyisi."""
+        if self.tg is None:
+            return
+        c = self.store._conn
+        day_ago = int(time.time() * 1000) - 24 * 3600 * 1000
+        op = c.execute("SELECT COUNT(*) FROM binance_trades WHERE closed_at IS NULL").fetchone()[0]
+        tc, ttp, tsl, tpnl = c.execute(
+            "SELECT COUNT(*),COALESCE(SUM(pnl_usd>0),0),COALESCE(SUM(pnl_usd<0),0),"
+            "COALESCE(SUM(pnl_usd),0) FROM binance_trades WHERE state='closed' AND closed_at>=?",
+            (day_ago,)).fetchone()
+        ac, atp, asl, apnl = c.execute(
+            "SELECT COUNT(*),COALESCE(SUM(pnl_usd>0),0),COALESCE(SUM(pnl_usd<0),0),"
+            "COALESCE(SUM(pnl_usd),0) FROM binance_trades WHERE state='closed'").fetchone()
+        twr = ttp / (ttp + tsl) * 100 if (ttp + tsl) else 0
+        awr = atp / (atp + asl) * 100 if (atp + asl) else 0
+        wallet = upnl = None
+        try:
+            a = self.client.account()
+            wallet = float(a.get("totalWalletBalance") or 0)
+            upnl = float(a.get("totalUnrealizedProfit") or 0)
+        except BinanceAuthError:
+            pass
+        best = c.execute("SELECT symbol,pnl_usd FROM binance_trades WHERE state='closed' "
+                         "AND closed_at>=? ORDER BY pnl_usd DESC LIMIT 1", (day_ago,)).fetchone()
+        lines = ["🟡 *BINANCE GÜNLÜK ÖZET*"]
+        if wallet is not None:
+            lines.append(f"💰 Cüzdan `${wallet:,.0f}` · Açık P&L `${upnl:+.1f}`")
+        lines.append(f"🟢 Açık pozisyon: *{op}*")
+        lines.append(f"📋 Son 24s: {tc} kapandı (TP {ttp}/STOP {tsl}, WR %{twr:.0f}) → `${tpnl:+.1f}`")
+        lines.append(f"📈 Toplam: {ac} kapandı, WR %{awr:.0f} → `${apnl:+.1f}`")
+        if best and best[1] is not None:
+            lines.append(f"🏆 Bugün en iyi: {best[0]} `${best[1]:+.1f}`")
+        self._notify("\n".join(lines))

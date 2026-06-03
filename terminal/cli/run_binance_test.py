@@ -130,6 +130,20 @@ def _sync_loop(engine: BinanceTestEngine, stop_event: threading.Event, interval:
         stop_event.wait(interval)
 
 
+def _summary_loop(engine: BinanceTestEngine, stop_event: threading.Event,
+                  hours: float) -> None:
+    """Periyodik Telegram günlük özeti. İlk özeti ~2dk sonra (deploy doğrulama),
+    sonra her `hours` saatte bir."""
+    if stop_event.wait(120):
+        return
+    while not stop_event.is_set():
+        try:
+            engine.send_daily_summary()
+        except Exception as e:
+            log.warning("BNB özet hatası: %s", e)
+        stop_event.wait(hours * 3600)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="terminal-binance-test",
@@ -163,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-htf", action="store_true")
     ap.add_argument("--no-telegram", action="store_true",
                     help="Telegram açılış/kapanış bildirimlerini kapat.")
+    ap.add_argument("--summary-hours", type=float, default=24.0,
+                    help="Periyodik Telegram özet aralığı (saat). 0=kapalı.")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
 
@@ -263,6 +279,10 @@ def main(argv: list[str] | None = None) -> int:
     for t in threads:
         t.start()
     sync_thread.start()
+    if tg is not None and args.summary_hours > 0:
+        threading.Thread(target=_summary_loop,
+                         args=(engine, stop_event, args.summary_hours), daemon=True).start()
+        log.info("Telegram günlük özet: her %.0f saatte bir", args.summary_hours)
     try:
         while not stop_event.is_set():
             stop_event.wait(1.0)
