@@ -22,6 +22,9 @@ Environment=BINANCE_SECRET=DOLDUR
 #                       cap 6000 +213K backtest → −4K canlı). Sınırsız bırak.
 #   --target-margin 30: her işlem ~$30 teminat → çok pozisyon sığar, risk sabit.
 #   --pamonic         : SADECE D'de Order Block olan setuplar (dar stop + yapısal TP).
+#   --pa-gate pa      : OB'ye EK price-action (SMC) kapısı. backtest (OKX 3ay, gerçekçi
+#                       limit dolum) kazananı = (likidite_süpürme VEYA rejection) VE discount.
+#                       Baz beklenti -0.09R → +0.89R/işlem (1ay & 3ay'da B pozitif).
 #   Giriş: KOD DEFAULT limit (ideal harmonik fiyat). Çıkış engine-yönetimli.
 ExecStart=/home/harmonik/harmonik-binance/venv/bin/python -m terminal.cli.run_binance_test \
     --combos-file config/tracked_combos.txt \
@@ -31,6 +34,7 @@ ExecStart=/home/harmonik/harmonik-binance/venv/bin/python -m terminal.cli.run_bi
     --risk 5 \
     --target-margin 30 \
     --pamonic \
+    --pa-gate pa \
     --log-level INFO
 Restart=on-failure
 RestartSec=10
