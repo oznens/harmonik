@@ -25,6 +25,7 @@ from terminal.db.store import Store
 from terminal.detection.models import Setup
 from terminal.lifecycle.states import TERMINAL_STATES
 from terminal.quality.pamonic import pamonic_confluence
+from terminal.quality.pa_confluence import pa_signals
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class BinanceTestEngine:
                  pamonic: bool = False, max_open: int = 0,
                  fixed_leverage: int = 0, max_notional: float = 0.0,
                  target_margin: float = 0.0, min_free_usdt: float = 0.0,
-                 entry_type: str = "limit", tg=None) -> None:
+                 entry_type: str = "limit", pa_gate: str = "", tg=None) -> None:
         self.store = store
         self.client = client
         self.instruments = instruments
@@ -73,6 +74,9 @@ class BinanceTestEngine:
         self.initial_equity = initial_equity
         self.max_lever = max_lever
         self.pamonic = pamonic
+        # PA confluence kapısı (OB'ye EK price-action filtresi). "" = kapalı.
+        # "pa" = (likidite_süpürme VEYA rejection) VE discount — backtest kazananı.
+        self.pa_gate = pa_gate
         self.entry_type = "market" if entry_type == "market" else "limit"
         self.max_open = max_open
         self.fixed_leverage = fixed_leverage
@@ -98,6 +102,40 @@ class BinanceTestEngine:
             stop = ob.top * (1 + OB_STOP_BUFFER)
         tp = setup.tp2 if setup.tp2 else setup.tp1
         return stop, tp, True
+
+    def _pa_gate_ok(self, setup: Setup, klines: list | None) -> bool:
+        """OB'ye EK price-action confluence kapısı (SMC). pa_gate boşsa hep True.
+
+        Backtest (OKX 3ay, gerçekçi limit dolum) en sağlam kapı:
+          "pa" = (likidite_süpürme VEYA rejection_candle) VE discount.
+        Bu kapı baz beklentiyi −0.09R'den +0.89R/işlem'e çıkardı (her iki dönem +).
+        """
+        if not self.pa_gate:
+            return True
+        if not klines or len(klines) < 10:
+            return True
+        d_idx = next((i for i, k in enumerate(klines)
+                      if k["open_time"] == setup.pivots["D"].time), len(klines) - 1)
+        sig = pa_signals(setup, klines, d_idx)
+        g = self.pa_gate
+        if g == "sweep":
+            ok = sig.liq_sweep
+        elif g == "reject":
+            ok = sig.rejection
+        elif g in ("sweep|reject", "sweep_reject"):
+            ok = sig.liq_sweep or sig.rejection
+        elif g.startswith("score>="):
+            try:
+                ok = sig.score >= int(g.split(">=")[1])
+            except ValueError:
+                ok = True
+        else:  # "pa" (varsayılan kazanan) ve bilinmeyenler
+            ok = (sig.liq_sweep or sig.rejection) and sig.discount
+        if not ok:
+            log.info("BNB SKIP (PA '%s'): %s %s sweep=%s reject=%s disc=%s → pas",
+                     g, setup.symbol, setup.interval, sig.liq_sweep, sig.rejection,
+                     sig.discount)
+        return ok
 
     def _migrate(self) -> None:
         self.store._conn.execute("""
@@ -172,6 +210,8 @@ class BinanceTestEngine:
                 if not ok:
                     log.info("BNB SKIP (PaMonic): %s %s OB yok → pas geç",
                              setup.symbol, setup.interval)
+                    return None
+                if not self._pa_gate_ok(setup, klines):
                     return None
                 stop_level, tp_level = ob_stop, ob_tp
             else:

@@ -170,6 +170,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="limit (DEFAULT — ideal harmonik fiyat) | market (anında dol).")
     ap.add_argument("--pamonic", action="store_true",
                     help="PaMonic: OB yoksa pas (enforce), dar OB stop + yapısal TP.")
+    ap.add_argument("--pa-gate", default="",
+                    help="OB'ye EK price-action kapısı (SMC). Boş=kapalı. "
+                         "'pa'=(likidite_süpürme|rejection)&discount (backtest kazananı), "
+                         "'sweep', 'reject', 'sweep|reject', 'score>=N'.")
     ap.add_argument("--data-base", default=BINANCE_DATA_BASE,
                     help=f"Market verisi tabanı (default {BINANCE_DATA_BASE}).")
     ap.add_argument("--testnet-data", action="store_true",
@@ -248,11 +252,11 @@ def main(argv: list[str] | None = None) -> int:
                                pamonic=args.pamonic, max_open=args.max_open,
                                fixed_leverage=args.leverage, max_notional=args.max_notional,
                                target_margin=args.target_margin, min_free_usdt=args.min_free,
-                               entry_type=args.entry_type, tg=tg)
+                               entry_type=args.entry_type, pa_gate=args.pa_gate, tg=tg)
 
-    log.info("Binance hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s, risk $%s, "
-             "max-notional %s", len(combos), args.poll_seconds, args.sync_seconds,
-             args.pamonic, args.risk, args.max_notional or "∞")
+    log.info("Binance hat: %d kombinasyon, poll %ds, sync %ds, PaMonic=%s, PA-gate=%s, "
+             "risk $%s, max-notional %s", len(combos), args.poll_seconds, args.sync_seconds,
+             args.pamonic, args.pa_gate or "kapalı", args.risk, args.max_notional or "∞")
 
     workers: list[BinanceWorker] = []
     threads: list[threading.Thread] = []
