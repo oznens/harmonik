@@ -385,7 +385,7 @@ _TRADE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <span>Sonuç <b class="__PC__">__PNL__</b></span>
 <a href="__TVURL__" target="_blank">TradingView ↗</a></div>
 <div id="wrap"><div id="c"></div><div id="ov"></div></div>
-<div class="note">Mor kutu=OB (Order Block) · CE=OB ortası · Kırmızı=SL bölgesi · Yeşil=TP bölgesi · Sarı=XABCD · oklar giriş/çıkış. Mumlar Binance.</div>
+<div class="note">Gri kutu=OB (Order Block, D'den) · CE=OB ortası · Kırmızı=SL bölgesi · Yeşil=TP bölgesi · Sarı=XABCD · oklar giriş/çıkış. Mumlar Binance.</div>
 <script src="/lwc.js"></script><script>
 var L=window.LightweightCharts, wrap=document.getElementById('wrap'), ov=document.getElementById('ov');
 var ch=L.createChart(document.getElementById('c'),{width:wrap.clientWidth,height:wrap.clientHeight,
@@ -411,7 +411,7 @@ function draw(){
  if(OBLO!=null){
   if(BULL) box(OBT,T1,OBLO,SL,'rgba(239,83,80,0.15)','rgba(239,83,80,0.45)');
   else     box(OBT,T1,SL,OBHI,'rgba(239,83,80,0.15)','rgba(239,83,80,0.45)');
-  box(OBT,T1,OBHI,OBLO,'rgba(124,77,255,0.18)','rgba(124,77,255,0.7)');
+  box(OBT,T1,OBHI,OBLO,'rgba(150,150,165,0.22)','rgba(170,170,185,0.8)');
  }
 }
 fetch('/klines?symbol=__SYM__&interval=__IV__&end=__END__').then(x=>x.json()).then(function(d){
@@ -495,7 +495,7 @@ def _trade_page(db_path, setup_id) -> bytes:
     is_bull = r["direction"] == "bull"
     t0 = (r["opened_at"] or r["d_time"] or 0) // 1000
     t1 = end // 1000
-    obt = (ob_time or r["d_time"] or 0) // 1000
+    obt = (r["d_time"] or ob_time or 0) // 1000   # OB kutusu D noktasından (PRZ) başlar
     tv = (f"https://www.tradingview.com/chart/?symbol=BINANCE:{_e(r['symbol'])}.P"
           f"&interval={_TV_TF.get(r['interval'], '15')}")
     html = _TRADE_HTML
