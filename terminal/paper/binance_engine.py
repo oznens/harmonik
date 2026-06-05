@@ -455,6 +455,14 @@ class BinanceTestEngine:
                     continue
                 # İki bağımsız okuma da flat → gerçekten kapanmış → gerçek P&L yaz
                 pnl = self.client.realized_pnl(symbol, since_ms=opened_at - 1000)
+                # algo (conditional TP/SL) emirleri AYRI endpoint'te → cancel_all onları
+                # iptal ETMEZ. Önce algo'ları iptal et, yoksa kapanan pozisyonun TP/SL'i
+                # 'open orders'ta asılı kalır (ve ZEC örneğindeki gibi yeni pozisyona karışır).
+                try:
+                    for a in self.client.open_algo_orders(symbol):
+                        self.client.cancel_algo_order(symbol, a.get("algoId"))
+                except BinanceAuthError:
+                    pass
                 self.client.cancel_all(symbol)
                 self.store._conn.execute(
                     "UPDATE binance_trades SET state='closed', pnl_usd=?, closed_at=? "
